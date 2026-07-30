@@ -147,7 +147,7 @@ jobs:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.triage.outputs.head_ref }}
           # Need a real (not shallow) clone so the auto-commit lands on top
