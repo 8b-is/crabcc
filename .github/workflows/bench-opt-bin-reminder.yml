@@ -28,7 +28,7 @@ jobs:
   remind:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     # Never run on forks.
-    if: github.repository == 'crabcc-labs/crabcc'
+    if: github.repository == '8b-is/crabcc'
     steps:
       - name: Post weekly Discord reminder
         env:

@@ -8,7 +8,7 @@
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/crabcc-labs/crabcc/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/8b-is/crabcc/main/install.sh | bash
 
 # Index a repo
 cd your-project
@@ -50,9 +50,9 @@ crabcc serve
 ## Install options
 
 ```bash
-brew install crabcc-labs/tap/crabcc
+brew install 8b-is/tap/crabcc
 cargo install crabcc-cli
-# or: curl -fsSL https://raw.githubusercontent.com/crabcc-labs/crabcc/main/install.sh | bash
+# or: curl -fsSL https://raw.githubusercontent.com/8b-is/crabcc/main/install.sh | bash
 ```
 
 ## License

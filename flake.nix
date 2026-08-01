@@ -156,7 +156,7 @@
     // {
       # ── NixOS modules — import in your flake's nixosConfigurations ────────────
       # Example:
-      #   inputs.crabcc.url = "github:crabcc-labs/crabcc";
+      #   inputs.crabcc.url = "github:8b-is/crabcc";
       #   modules = [ inputs.crabcc.nixosModules.wormhole-relay ];
       #   services.wormhole-relay = { enable = true; package = inputs.crabcc.packages.${system}.wormhole-relay; };
       nixosModules = {

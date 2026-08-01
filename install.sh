@@ -5,7 +5,7 @@
 # Modern one-liner installer. Designed to be invoked verbatim:
 #
 #   gh api -H 'Accept: application/vnd.github.v3.raw' \
-#       /repos/crabcc-labs/crabcc/contents/install.sh | bash
+#       /repos/8b-is/crabcc/contents/install.sh | bash
 #
 # What it does in a single pass (idempotent — re-run any time):
 #
@@ -46,7 +46,7 @@
 #
 # Environment:
 #   CRABCC_INSTALL_DIR   target dir (defaults to ~/.cargo/bin)
-#   CRABCC_REPO          source repo (defaults to crabcc-labs/crabcc;
+#   CRABCC_REPO          source repo (defaults to 8b-is/crabcc;
 #                        also honoured by `crabcc upgrade`)
 #
 # Exit codes:
@@ -107,7 +107,7 @@ for arg in "$@"; do
 done
 
 # --- config ---------------------------------------------------------------
-REPO="${CRABCC_REPO:-crabcc-labs/crabcc}"
+REPO="${CRABCC_REPO:-8b-is/crabcc}"
 BIN_NAME="crabcc"
 INSTALL_DIR="${BIN_DIR_OVERRIDE:-${CRABCC_INSTALL_DIR:-$HOME/.cargo/bin}}"
 
