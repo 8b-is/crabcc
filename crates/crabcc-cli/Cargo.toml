@@ -38,6 +38,7 @@ memory-embed = ["crabcc-memory/memory-embed"]
 # `tracing-subscriber` + `tracing-appender` init pulls in. Off by
 # default for a lean default install.
 telemetry = ["dep:tracing-subscriber", "dep:tracing-appender", "dep:flate2"]
+viz = []
 
 [dependencies]
 walkdir = "2.5.0"
