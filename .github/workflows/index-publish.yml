@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   publish:
-    runs-on: [self-hosted, linux, hetzner]
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6

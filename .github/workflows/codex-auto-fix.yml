@@ -35,20 +35,31 @@
 
 name: Codex auto-fix (Aperture)
 
+# ── DISABLED: dispatch-only until the Aperture route is settled ──────────
+# This workflow talks to Aperture at `http://$APERTURE_HOSTNAME/v1`, a
+# MagicDNS name that only resolves from inside the tailnet. The Hetzner
+# self-hosted runners were tailnet-joined; the Blacksmith runners that
+# replaced them are not, so every automatic run would burn a full
+# checkout + toolchain install and then die on DNS.
+#
+# The `issue_comment` trigger is commented out rather than deleted — the
+# @codex / @codex-fix mention path is one uncomment away once either:
+#   a) a `tailscale/github-action@v3` step is added below with an
+#      ephemeral-node OAuth client whose tag is authorized on the Aperture
+#      ACL (Aperture authenticates by Tailscale identity, so joining the
+#      tailnet is necessary but not sufficient), or
+#   b) Aperture is reachable over a routable address with the Blacksmith
+#      static IP allowlisted, and base_url below is updated.
+# Same gate applies to conflict-bot.yml.
 on:
-  # No scheduled scan-all sweep: the */5 cron re-ran Codex on EVERY open PR
-  # every 5 minutes, flooding PRs with [codex-fix] commits + summary comments
-  # (and hammering the 2 self-hosted runners). Codex is now on-demand only --
-  # mention @codex / @codex-fix on a PR, or workflow_dispatch. Routine review
-  # is /code-review (run it in-session before opening the PR).
   workflow_dispatch:
     inputs:
       pr:
         description: 'PR number (blank = scan all open)'
         required: false
         type: string
-  issue_comment:
-    types: [created]
+  # issue_comment:
+  #   types: [created]
 
 permissions:
   contents: write
@@ -70,7 +81,7 @@ jobs:
        (contains(github.event.comment.body, '@codex-fix') ||
         contains(github.event.comment.body, '@codex')))
     name: Resolve target PR(s)
-    runs-on: [self-hosted, linux, hetzner]
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     outputs:
       prs: ${{ steps.resolve.outputs.prs }}
     steps:
@@ -108,7 +119,7 @@ jobs:
     needs: triage
     if: needs.triage.outputs.prs != '[]' && needs.triage.outputs.prs != ''
     name: Codex fix PR #${{ matrix.pr }}
-    runs-on: [self-hosted, linux, hetzner]
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     strategy:
       fail-fast: false
       max-parallel: 3

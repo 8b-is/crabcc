@@ -1,0 +1,28 @@
+name: rust-deps
+description: >
+  Install the Linux build/test dependencies this workspace assumes:
+  mold (fast linker, referenced by CARGO_TARGET_..._RUSTFLAGS) and ripgrep
+  (required by shell_rewrite_e2e::find_swaps_to_ripgrep, which only emits the
+  find→rg swap when `rg` is on PATH).
+
+  Replaces the old mold→wild→default-ld fallback ladder. That ladder existed
+  because the Hetzner self-hosted runners routinely ENOSPC'd mid-apt; Blacksmith
+  runners are ephemeral microVMs with 80+ GB of scratch, so a failed install is
+  a real failure and should stop the job rather than silently degrade.
+
+runs:
+  using: composite
+  steps:
+    - name: install mold + ripgrep
+      shell: bash
+      run: |
+        set -euo pipefail
+        MISSING=()
+        command -v mold >/dev/null 2>&1 || MISSING+=(mold)
+        command -v rg   >/dev/null 2>&1 || MISSING+=(ripgrep)
+        if [ ${#MISSING[@]} -eq 0 ]; then
+          echo "mold + ripgrep already present"
+          exit 0
+        fi
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends "${MISSING[@]}"

@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   mark-ready:
-    runs-on: [self-hosted, linux, light]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.pull_request.draft == true
     steps:
       - name: Mark PR ready for review

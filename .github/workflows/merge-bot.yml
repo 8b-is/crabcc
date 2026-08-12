@@ -77,7 +77,7 @@ concurrency:
 jobs:
   bot:
     name: Sweep + act
-    runs-on: [self-hosted, linux, hetzner]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MERGE_TOKEN: ${{ secrets.MERGE_BOT_PAT }}

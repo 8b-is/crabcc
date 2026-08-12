@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   preflight:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       enabled: ${{ steps.check.outputs.enabled }}
     steps:
@@ -39,7 +39,7 @@ jobs:
   image:
     needs: preflight
     if: needs.preflight.outputs.enabled == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
       - name: log in to Docker Hub

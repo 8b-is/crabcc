@@ -39,7 +39,7 @@ jobs:
     if: >-
       ${{ github.event.sender.type != 'Bot'
           && (github.event_name == 'issue_comment' || github.base_ref == 'main') }}
-    runs-on: [self-hosted, linux, hetzner]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     name: PR-Agent (Claude)
     steps:
       - name: Run PR-Agent

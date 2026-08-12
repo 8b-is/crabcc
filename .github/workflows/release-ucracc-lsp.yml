@@ -25,12 +25,13 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: [self-hosted, linux, hetzner]
+            os: blacksmith-8vcpu-ubuntu-2404
             archive: tar.gz
+          # Native ARM build on a Blacksmith runner — see release.yml for
+          # why the `cross` cross-compile path was dropped.
           - target: aarch64-unknown-linux-gnu
-            os: [self-hosted, linux, hetzner]
+            os: blacksmith-8vcpu-ubuntu-2404-arm
             archive: tar.gz
-            cross: true
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
@@ -46,18 +47,8 @@ jobs:
         with:
           shared-key: release-ucracc-lsp-${{ matrix.target }}
 
-      - name: install cross (linux aarch64 only)
-        if: matrix.cross
-        run: cargo install cross --locked
-
       - name: build release
-        shell: bash
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} -p ucracc-lsp
-          else
-            cargo build --release --target ${{ matrix.target }} -p ucracc-lsp
-          fi
+        run: cargo build --release --target ${{ matrix.target }} -p ucracc-lsp
 
       - name: package
         shell: bash
@@ -81,7 +72,7 @@ jobs:
   release:
     name: release
     needs: build
-    runs-on: [self-hosted, linux, hetzner]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     # Job-level env so the `if:` gates below can read it — the `secrets`
     # context isn't available directly in step `if:` conditions, but `env` is.
     env:

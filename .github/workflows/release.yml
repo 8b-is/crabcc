@@ -19,12 +19,16 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: [self-hosted, linux, hetzner]
+            os: blacksmith-8vcpu-ubuntu-2404
             archive: tar.gz
+          # Built natively on a Blacksmith ARM runner. This leg used to
+          # cross-compile (`cargo install cross` + `cross build` — minutes of
+          # setup plus a Docker-in-Docker toolchain) because the self-hosted
+          # pool was x86-only. Native ARM is faster and deletes the whole
+          # cross code path below.
           - target: aarch64-unknown-linux-gnu
-            os: [self-hosted, linux, hetzner]
+            os: blacksmith-8vcpu-ubuntu-2404-arm
             archive: tar.gz
-            cross: true
           # x86_64-apple-darwin (macos-13 runner) was dropped in v1.0.1: the
           # macos-13 GitHub-hosted runner pool is being deprecated and runner
           # allocation routinely sat in the queue for 60+ minutes during the
@@ -46,18 +50,8 @@ jobs:
         with:
           shared-key: release-${{ matrix.target }}
 
-      - name: install cross (linux aarch64 only)
-        if: matrix.cross
-        run: cargo install cross --locked
-
       - name: build release
-        shell: bash
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} -p crabcc-cli --features jemalloc
-          else
-            cargo build --release --target ${{ matrix.target }} -p crabcc-cli --features jemalloc
-          fi
+        run: cargo build --release --target ${{ matrix.target }} -p crabcc-cli --features jemalloc
 
       - name: package
         shell: bash
@@ -94,7 +88,7 @@ jobs:
   release:
     name: release
     needs: build
-    runs-on: [self-hosted, linux, hetzner]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8

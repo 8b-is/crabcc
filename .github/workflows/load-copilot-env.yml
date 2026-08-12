@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   export:
-    runs-on: [self-hosted, linux, light]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     environment: copilot
     steps:
       - uses: actions/checkout@v6

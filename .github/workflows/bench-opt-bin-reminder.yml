@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   remind:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     # Never run on forks.
     if: github.repository == 'crabcc-labs/crabcc'
     steps:
