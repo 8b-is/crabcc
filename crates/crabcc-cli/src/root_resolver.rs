@@ -19,7 +19,7 @@
 //! `git -C <source> pull` or pass `--root <local-path>`).
 
 use anyhow::{anyhow, bail, Context, Result};
-use crabcc_core::hash::sha256_hex;
+use crabcc_core::index_layout;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -116,24 +116,17 @@ pub(crate) fn resolve_with_home(input: &str, home_override: Option<&Path>) -> Re
         let abs = raw
             .canonicalize()
             .with_context(|| format!("`--root` path does not exist: {input}"))?;
-        if use_in_repo_layout(&abs) {
-            let in_repo = abs.join(".crabcc");
-            return Ok(ResolvedRoot {
-                source_dir: abs.clone(),
-                data_dir: in_repo,
-                layout: Layout::InRepo,
-                key: None,
-                origin: Origin::LocalPath(abs),
-            });
-        }
-        let key = repo_storage_key(&abs);
-        let base = repos_dir(home_override)?.join(&key);
-        std::fs::create_dir_all(&base)?;
+        // Delegate to crabcc-core so the MCP server (which has no access to
+        // this module) resolves the same repo to the same artifacts dir.
+        let resolved = index_layout::resolve_with_home(&abs, home_override)?;
         Ok(ResolvedRoot {
             source_dir: abs.clone(),
-            data_dir: base,
-            layout: Layout::Centralised,
-            key: Some(key),
+            data_dir: resolved.data_dir,
+            layout: match resolved.layout {
+                index_layout::Layout::InRepo => Layout::InRepo,
+                index_layout::Layout::Centralised => Layout::Centralised,
+            },
+            key: resolved.key,
             origin: Origin::LocalPath(abs),
         })
     }
@@ -175,115 +168,6 @@ fn cache_key(input: &str) -> String {
         })
 }
 
-/// When true, index artifacts live under `<repo>/.crabcc/` (legacy).
-/// Opt out on Mac / worktrees with `CRABCC_LAYOUT=centralised`.
-fn use_in_repo_layout(abs: &Path) -> bool {
-    if layout_forced_centralised() {
-        return false;
-    }
-    let in_repo = abs.join(".crabcc");
-    in_repo.exists() && in_repo.is_dir()
-}
-
-fn layout_forced_centralised() -> bool {
-    match std::env::var("CRABCC_LAYOUT")
-        .ok()
-        .as_deref()
-        .map(str::trim)
-    {
-        Some("centralised" | "centralized") => true,
-        Some("in-repo" | "in_repo") => false,
-        _ => std::env::var("CRABCC_IN_REPO_INDEX").ok().as_deref() == Some("0"),
-    }
-}
-
-/// Stable per-repo key under `$CRABCC_HOME/repos/`. Matches
-/// `crabcc-memory` layout so index + memory share one directory.
-fn repo_storage_key(repo_root: &Path) -> String {
-    let slug = sanitize_slug(
-        repo_root
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "unknown-repo".into())
-            .as_str(),
-    );
-    if let Some(url) = git_origin_url(repo_root) {
-        let hash6: String = sha256_hex(url.as_bytes()).chars().take(6).collect();
-        return format!("{slug}-{hash6}");
-    }
-    if let Some(common) = git_common_dir(repo_root) {
-        let hash6: String = sha256_hex(common.as_bytes()).chars().take(6).collect();
-        return format!("{slug}-{hash6}");
-    }
-    let canon = repo_root
-        .canonicalize()
-        .unwrap_or_else(|_| repo_root.to_path_buf());
-    cache_key(&canon.to_string_lossy())
-}
-
-fn sanitize_slug(raw: &str) -> String {
-    let s: String = raw
-        .chars()
-        .map(|c| {
-            let lower = c.to_ascii_lowercase();
-            if lower.is_ascii_alphanumeric() || lower == '-' || lower == '_' {
-                lower
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let trimmed = s.trim_matches('-');
-    if trimmed.is_empty() {
-        "unknown-repo".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn git_origin_url(repo_root: &Path) -> Option<String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .args(["config", "--get", "remote.origin.url"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8(out.stdout).ok()?.trim().to_string();
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
-}
-
-fn git_common_dir(repo_root: &Path) -> Option<String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .args(["rev-parse", "--git-common-dir"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let raw = String::from_utf8(out.stdout).ok()?.trim().to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    let path = PathBuf::from(&raw);
-    let abs = if path.is_absolute() {
-        path
-    } else {
-        repo_root.join(path)
-    };
-    abs.canonicalize()
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned())
-}
-
 fn repos_dir(override_: Option<&Path>) -> Result<PathBuf> {
     let base = match override_ {
         Some(p) => p.to_path_buf(),
@@ -313,7 +197,7 @@ fn ensure_cloned(clone_url: &str, dest: &Path) -> Result<()> {
         clone_url,
         dest.display()
     );
-    let status = std::process::Command::new("git")
+    let status = Command::new("git")
         .args(["clone", "--depth", "1", "--filter=blob:none", clone_url])
         .arg(dest)
         .status()
@@ -523,9 +407,12 @@ mod tests {
             .status()
             .unwrap();
         let url = "https://github.com/example/crabcc-test.git";
-        let hash6: String = sha256_hex(url.as_bytes()).chars().take(6).collect();
-        let a = repo_storage_key(tmp.path());
-        let b = repo_storage_key(tmp.path());
+        let hash6: String = crabcc_core::hash::sha256_hex(url.as_bytes())
+            .chars()
+            .take(6)
+            .collect();
+        let a = index_layout::repo_storage_key(tmp.path());
+        let b = index_layout::repo_storage_key(tmp.path());
         assert_eq!(a, b);
         assert!(
             a.ends_with(&hash6),

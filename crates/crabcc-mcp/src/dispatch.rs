@@ -179,7 +179,12 @@ fn dispatch_tool_inner(
     }
 
     if cache.is_none() {
-        let db = root.join(".crabcc").join("index.db");
+        // Must go through `index_layout` — NOT `root.join(".crabcc")`. The
+        // index may live centrally under `$CRABCC_HOME/repos/<key>/`, and
+        // because `Store::open` creates whatever path it is handed, guessing
+        // wrong yields an empty database and silently empty results rather
+        // than an error. `index_layout` is the same resolver the CLI uses.
+        let db = crabcc_core::index_layout::index_db(root)?;
         let parent = db
             .parent()
             .ok_or_else(|| anyhow::anyhow!("invalid index path: {}", db.display()))?;

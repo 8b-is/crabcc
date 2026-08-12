@@ -67,6 +67,7 @@ pub mod gitdiff;
 pub mod graph;
 pub mod hash;
 pub mod index;
+pub mod index_layout;
 #[cfg(feature = "markdown")]
 pub mod md;
 pub mod ollama_stack;
