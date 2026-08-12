@@ -29,7 +29,7 @@ use crate::backend::{sqlite::SqliteBackend, Backend, LexicalQuery};
 use crate::embed::{Embedder, HashEmbedder};
 use crate::types::*;
 use anyhow::{Context, Result};
-use path::migrate_legacy_if_needed;
+use path::{migrate_key_change_if_needed, migrate_legacy_if_needed};
 use rrf::rrf_fuse;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -53,6 +53,10 @@ impl Palace {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("create {}", parent.display()))?;
         }
+        // Key-change carry-forward runs first: drawers written under the
+        // pre-alignment global key are newer than any in-repo `.crabcc/`
+        // copy. Both are no-ops once `db_path` exists.
+        migrate_key_change_if_needed(repo_root, &db_path)?;
         migrate_legacy_if_needed(repo_root, &db_path)?;
         let backend = SqliteBackend::open(&db_path)?;
         Ok(Self {
@@ -398,22 +402,55 @@ mod tests {
         assert_eq!(sanitize_slug(""), "unknown-repo");
     }
 
+    // The contract this key must satisfy is no longer "slug when there is
+    // no origin" — it is "whatever the symbol index uses", so memory.db and
+    // index.db share one `$CRABCC_HOME/repos/<key>/` directory. Asserting
+    // the shape independently is what let the two drift apart.
     #[test]
-    fn repo_storage_key_falls_back_to_slug_without_origin() {
-        // tempdir → no .git, so no origin URL. Slug-only key.
+    fn repo_storage_key_matches_the_symbol_index() {
         ensure_test_crabcc_home();
         let dir = tempdir().unwrap();
         let key = repo_storage_key(dir.path());
         assert!(!key.is_empty());
         assert!(!key.contains('/'));
-        // No hash suffix when origin is missing — slug stands alone.
-        assert!(
-            !key.contains('-')
-                || key.matches('-').count()
-                    == sanitize_slug(&dir.path().file_name().unwrap().to_string_lossy())
-                        .matches('-')
-                        .count(),
-            "key {key:?} should not have an extra `-<hash6>` suffix"
+        assert_eq!(key, crabcc_core::index_layout::repo_storage_key(dir.path()));
+    }
+
+    // Repos that had drawers under the pre-alignment key must not come back
+    // empty — that silent-empty-database failure is exactly what the
+    // alignment was fixing on the index side.
+    #[test]
+    fn migrates_drawers_from_the_pre_alignment_key() {
+        ensure_test_crabcc_home();
+        let dir = tempdir().unwrap();
+
+        // Pre-alignment key for an origin-less dir was the bare slug.
+        let old_key = sanitize_slug(&dir.path().file_name().unwrap().to_string_lossy());
+        let new_path = resolve_db_path(dir.path()).unwrap();
+        assert_ne!(
+            new_path.parent().unwrap().file_name().unwrap(),
+            old_key.as_str(),
+            "test is vacuous unless the keys actually differ"
+        );
+
+        let old_path = new_path.parent().unwrap().with_file_name(&old_key);
+        std::fs::create_dir_all(&old_path).unwrap();
+        let old_db = old_path.join("memory.db");
+        let id = {
+            let backend = Arc::new(SqliteBackend::open(&old_db).unwrap());
+            let p = Palace::with_components(dir.path(), backend, Arc::new(HashEmbedder::new()));
+            p.remember("default", None, "doc:1", "drawer written under the old key")
+                .unwrap()
+        };
+
+        if new_path.exists() {
+            std::fs::remove_file(&new_path).unwrap();
+        }
+        let p = Palace::open(dir.path()).unwrap();
+        assert_eq!(
+            p.get(id).unwrap().map(|d| d.body),
+            Some("drawer written under the old key".to_string()),
+            "drawer written under the old key must survive the migration"
         );
     }
 

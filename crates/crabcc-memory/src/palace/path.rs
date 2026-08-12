@@ -49,7 +49,20 @@ pub(super) fn crabcc_home_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".crabcc"))
 }
 
+/// Delegates to `crabcc-core` so memory.db and index.db land in the *same*
+/// `$CRABCC_HOME/repos/<key>/` directory. They used to disagree: this
+/// function returned a bare `slug` when a repo had no `remote.origin.url`,
+/// while the index added a `-<hash6>` derived from the git common dir. Repos
+/// with an origin were unaffected (both hash the origin URL); origin-less
+/// repos — `git init` with no remote, and the CI fixtures — split across two
+/// directories. See `migrate_key_change_if_needed` for the carry-forward.
 pub(super) fn repo_storage_key(repo_root: &Path) -> String {
+    crabcc_core::index_layout::repo_storage_key(repo_root)
+}
+
+/// The pre-alignment key rule, kept only so the migration below can find
+/// drawers written under it. Do not use for new writes.
+fn legacy_repo_storage_key(repo_root: &Path) -> String {
     let raw_basename = repo_root
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -119,6 +132,42 @@ pub(super) fn migrate_legacy_if_needed(repo_root: &Path, new_path: &Path) -> Res
     eprintln!(
         "crabcc-memory: migrated drawers from {} -> {}",
         legacy.display(),
+        new_path.display()
+    );
+    Ok(())
+}
+
+/// One-shot migration for the storage-key alignment: if drawers exist under
+/// the old key and nothing exists under the new one, copy them forward.
+/// Idempotent and a no-op for every repo with a `remote.origin.url` (old and
+/// new keys are identical there).
+///
+/// Copies rather than renames, matching `migrate_legacy_if_needed`: the old
+/// directory stays put, so a downgrade to a pre-alignment build still finds
+/// its data instead of silently opening an empty database.
+pub(super) fn migrate_key_change_if_needed(repo_root: &Path, new_path: &Path) -> Result<()> {
+    if new_path.exists() {
+        return Ok(());
+    }
+    let old_key = legacy_repo_storage_key(repo_root);
+    if old_key == repo_storage_key(repo_root) {
+        return Ok(());
+    }
+    let old_path = crabcc_home_dir()?
+        .join("repos")
+        .join(old_key)
+        .join("memory.db");
+    if !old_path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = new_path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    std::fs::copy(&old_path, new_path)
+        .with_context(|| format!("copy {} -> {}", old_path.display(), new_path.display()))?;
+    eprintln!(
+        "crabcc-memory: storage key aligned with the symbol index; copied drawers {} -> {}",
+        old_path.display(),
         new_path.display()
     );
     Ok(())
