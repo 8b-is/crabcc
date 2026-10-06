@@ -127,8 +127,7 @@ pub(super) fn migrate_legacy_if_needed(repo_root: &Path, new_path: &Path) -> Res
     if let Some(parent) = new_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    std::fs::copy(&legacy, new_path)
-        .with_context(|| format!("copy {} -> {}", legacy.display(), new_path.display()))?;
+    snapshot_if_absent(&legacy, new_path)?;
     eprintln!(
         "crabcc-memory: migrated drawers from {} -> {}",
         legacy.display(),
@@ -163,8 +162,7 @@ pub(super) fn migrate_key_change_if_needed(repo_root: &Path, new_path: &Path) ->
     if let Some(parent) = new_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    std::fs::copy(&old_path, new_path)
-        .with_context(|| format!("copy {} -> {}", old_path.display(), new_path.display()))?;
+    snapshot_if_absent(&old_path, new_path)?;
     eprintln!(
         "crabcc-memory: storage key aligned with the symbol index; copied drawers {} -> {}",
         old_path.display(),
@@ -187,5 +185,74 @@ pub fn find_git_root(start: &Path) -> Option<PathBuf> {
             return Some(p);
         }
         p = p.parent()?.to_path_buf();
+    }
+}
+
+// A main-file copy misses committed WAL pages. Build a SQLite snapshot beside
+// the destination, then publish without replacing another opener's database.
+fn snapshot_if_absent(source: &Path, destination: &Path) -> Result<()> {
+    let parent = destination
+        .parent()
+        .context("migration destination has no parent")?;
+    let temporary = tempfile::NamedTempFile::new_in(parent)?;
+    let connection =
+        rusqlite::Connection::open_with_flags(source, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    connection.busy_timeout(std::time::Duration::from_secs(5))?;
+    let path = temporary
+        .path()
+        .to_str()
+        .context("snapshot path is not UTF-8")?;
+    connection.execute("VACUUM INTO ?1", rusqlite::params![path])?;
+    temporary.as_file().sync_all()?;
+    match temporary.persist_noclobber(destination) {
+        Ok(_) => Ok(()),
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error.error.into()),
+    }
+}
+
+#[cfg(test)]
+mod migration_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn corrupt_source_does_not_publish_or_leave_temporary_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.db");
+        let destination = dir.path().join("destination.db");
+        std::fs::write(&source, b"not a database").unwrap();
+        assert!(snapshot_if_absent(&source, &destination).is_err());
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        assert_eq!(std::fs::read(&source).unwrap(), b"not a database");
+    }
+
+    #[test]
+    fn snapshot_preserves_live_wal_and_existing_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.db");
+        let destination = dir.path().join("destination.db");
+        let conn = rusqlite::Connection::open(&source).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE probe(value TEXT); PRAGMA wal_checkpoint(TRUNCATE); INSERT INTO probe VALUES ('committed');").unwrap();
+        snapshot_if_absent(&source, &destination).unwrap();
+        let copy = rusqlite::Connection::open(&destination).unwrap();
+        assert_eq!(
+            copy.query_row("SELECT value FROM probe", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "committed"
+        );
+        copy.execute("UPDATE probe SET value='preserved'", [])
+            .unwrap();
+        snapshot_if_absent(&source, &destination).unwrap();
+        assert_eq!(
+            copy.query_row("SELECT value FROM probe", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "preserved"
+        );
+        assert_eq!(
+            conn.query_row("SELECT value FROM probe", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "committed"
+        );
     }
 }
