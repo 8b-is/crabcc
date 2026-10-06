@@ -368,16 +368,15 @@ mod tests {
     fn migrate_legacy_db_on_first_open() {
         ensure_test_crabcc_home();
         let dir = tempdir().unwrap();
-        // Pre-stage a real, opened-then-closed legacy SQLite file via
-        // SqliteBackend itself. Writing arbitrary bytes wouldn't pass
-        // the SQLite header check on the migrated copy, so we use the
-        // real backend to guarantee a valid file.
+        // Keep the legacy connection open so committed drawers remain in WAL.
         let legacy_dir = dir.path().join(".crabcc");
         std::fs::create_dir_all(&legacy_dir).unwrap();
         let legacy_db = legacy_dir.join("memory.db");
-        {
-            let _ = SqliteBackend::open(&legacy_db).unwrap();
-        }
+        let backend = Arc::new(SqliteBackend::open(&legacy_db).unwrap());
+        let legacy = Palace::with_components(dir.path(), backend, Arc::new(HashEmbedder::new()));
+        let id = legacy
+            .remember("default", None, "doc:legacy", "committed legacy drawer")
+            .unwrap();
 
         let new_path = resolve_db_path(dir.path()).unwrap();
         // Safety: a previous test run may have left a slugged subdir
@@ -386,12 +385,20 @@ mod tests {
         if new_path.exists() {
             std::fs::remove_file(&new_path).unwrap();
         }
-        let _p = Palace::open(dir.path()).unwrap();
+        let p = Palace::open(dir.path()).unwrap();
+        assert_eq!(
+            p.get(id).unwrap().map(|d| d.body),
+            Some("committed legacy drawer".to_string())
+        );
+        assert!(legacy.get(id).unwrap().is_some());
 
-        // The migrated file must be byte-identical to the legacy one.
-        let legacy_bytes = std::fs::read(&legacy_db).unwrap();
-        let migrated_bytes = std::fs::read(&new_path).unwrap();
-        assert_eq!(migrated_bytes, legacy_bytes);
+        // VACUUM snapshots preserve database contents, not physical page layout.
+        let migrated = rusqlite::Connection::open(&new_path).unwrap();
+        let integrity: String = migrated
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
+        assert!(legacy_db.exists());
     }
 
     #[test]
@@ -436,12 +443,11 @@ mod tests {
         let old_path = new_path.parent().unwrap().with_file_name(&old_key);
         std::fs::create_dir_all(&old_path).unwrap();
         let old_db = old_path.join("memory.db");
-        let id = {
-            let backend = Arc::new(SqliteBackend::open(&old_db).unwrap());
-            let p = Palace::with_components(dir.path(), backend, Arc::new(HashEmbedder::new()));
-            p.remember("default", None, "doc:1", "drawer written under the old key")
-                .unwrap()
-        };
+        let backend = Arc::new(SqliteBackend::open(&old_db).unwrap());
+        let old = Palace::with_components(dir.path(), backend, Arc::new(HashEmbedder::new()));
+        let id = old
+            .remember("default", None, "doc:1", "drawer written under the old key")
+            .unwrap();
 
         if new_path.exists() {
             std::fs::remove_file(&new_path).unwrap();
