@@ -64,12 +64,9 @@ sqlite-vec = { workspace = true, optional = true }
 # on first use into the platform cache dir and reused thereafter.
 fastembed = { workspace = true, optional = true }
 
-[dev-dependencies]
 tempfile = { workspace = true }
 
-# `cache_bench` example uses tempfile + serde_json at the binary level
-# (not just inside #[cfg(test)]). dev-dependencies cover both, and
-# examples build under the dev profile, so no extra wiring needed.
+# `cache_bench` uses the same tempfile and serde_json dependencies.
 [[example]]
 name = "cache_bench"
 required-features = []
