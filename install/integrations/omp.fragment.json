@@ -1,0 +1,23 @@
+{
+  "skills": [
+    "crabcc",
+    "crabcc-mcp",
+    "crabcc-taskfile",
+    "caveman",
+    "stop-slop",
+    "verification-quality",
+    "sparc-methodology",
+    "github-code-review",
+    "github-project-management",
+    "github-release-management",
+    "github-multi-repo",
+    "github-workflow-automation",
+    "hooks-automation",
+    "stream-chain"
+  ],
+  "plugins": ["superpowers@claude-plugins-official"],
+  "mcp": "crabcc",
+  "env": {
+    "CRABCC_AUTO_MEMORY": "1"
+  }
+}
