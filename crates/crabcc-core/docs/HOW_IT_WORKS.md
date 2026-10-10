@@ -343,7 +343,7 @@ projection, `Store::iter_symbol_names`, so the FSST-compressed `signature`
 column is never decoded). Each `Row` precomputes the lowercased name and its
 alphanumeric **tokens**, so matching works *within* a `snake_case`/dotted name —
 matching what the former tokenized Tantivy index did. Replaced the Tantivy
-sidecar in v6.2.0 ([#700](https://github.com/crabcc-labs/crabcc/pull/700)),
+sidecar in v6.2.0 ([#700](https://github.com/8b-is/crabcc/pull/700)),
 which removed ~20 transitive crates from the build.
 
 Two query shapes:
@@ -352,7 +352,7 @@ Two query shapes:
   name or any token (`strore` → `store`; `usr` → `get_user_profile`). The DP is
   allocation-free over bytes (ASCII fast path) with a reusable scratch, and
   fast-bails once it has `limit` exact hits or a full candidate pool — so a
-  query matching most of the corpus returns in ~µs ([#713](https://github.com/crabcc-labs/crabcc/pull/713)).
+  query matching most of the corpus returns in ~µs ([#713](https://github.com/8b-is/crabcc/pull/713)).
 - `prefix(query, limit)` — case-insensitive starts-with on the whole name or any
   token, shortest match first. For `workspace/symbol` autocompletion.
 

@@ -234,7 +234,7 @@ jobs:
           git config user.email 'codex-auto-fix@users.noreply.github.com'
 
           cat > /tmp/codex-prompt.md <<'PROMPT'
-          You are an auto-fix bot working on PR #__PR__ of `crabcc-labs/crabcc`.
+          You are an auto-fix bot working on PR #__PR__ of `8b-is/crabcc`.
           The PR branch is already checked out. Read `CLAUDE.md` and `AGENTS.md`
           first so you follow repo conventions.
 
