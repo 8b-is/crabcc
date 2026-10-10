@@ -50,8 +50,7 @@ impl GatewayConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let src = std::fs::read_to_string(path)
             .with_context(|| format!("read gateway config {}", path.display()))?;
-        toml::from_str(&src)
-            .with_context(|| format!("parse gateway config {}", path.display()))
+        toml::from_str(&src).with_context(|| format!("parse gateway config {}", path.display()))
     }
 
     pub fn default_path() -> PathBuf {
@@ -202,8 +201,7 @@ impl Gateway {
                         for tool in tools {
                             let mut namespaced = tool.clone();
                             if let Some(name) = tool.get("name").and_then(Value::as_str) {
-                                namespaced["name"] =
-                                    Value::String(format!("{}.{name}", up.name));
+                                namespaced["name"] = Value::String(format!("{}.{name}", up.name));
                             }
                             // Prefix description so callers know the routing
                             if let Some(desc) = tool.get("description").and_then(Value::as_str) {
