@@ -41,6 +41,7 @@ mod doctor;
 mod edit;
 mod enrich_cmd;
 mod fetch_cmd;
+mod gateway;
 mod go;
 mod init_cmd;
 mod install;
@@ -54,7 +55,6 @@ mod rag;
 mod read;
 mod research_cmd;
 mod rewrite_log;
-mod gateway;
 mod root_resolver;
 mod run_cmd;
 mod shell_context;
@@ -1460,7 +1460,9 @@ fn main() -> Result<()> {
 
     // gateway — runs without a local Store; needs no index
     if let Some(Cmd::Gateway { config }) = cli.cmd.as_ref() {
-        let config_path = config.clone().unwrap_or_else(gateway::GatewayConfig::default_path);
+        let config_path = config
+            .clone()
+            .unwrap_or_else(gateway::GatewayConfig::default_path);
         return gateway::serve(&config_path);
     }
 
