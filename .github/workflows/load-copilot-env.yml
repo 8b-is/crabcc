@@ -23,7 +23,7 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     environment: copilot
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Write copilot.env
         env:

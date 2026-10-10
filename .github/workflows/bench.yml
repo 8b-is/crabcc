@@ -1,27 +1,42 @@
 name: bench
 
-# Criterion + divan benchmarks on a 16 vCPU / 64 GB Blacksmith runner.
+# Ephemeral OVHCloud benchmark runner.
 #
-# This used to be a three-job dance: provision an ephemeral OVHCloud
-# instance via OpenStack, register it as a one-shot self-hosted runner,
-# bench, then tear the instance down in an `if: always()` job so we didn't
-# leak billing. That machinery (plus its five OVH_* secrets and the
-# install/github-runner/ provisioning scripts, which no longer exist) is
-# replaced by a single `runs-on:` line — Blacksmith boots the microVM in
-# under 3s and bills only for the job.
+# Spins up a c2-15 (4 vCPU / 15 GB) OVHCloud instance, registers it as a
+# one-shot (--ephemeral) GitHub Actions runner, runs all Criterion benchmarks,
+# uploads the HTML reports as a workflow artifact, then deletes the instance.
+# The whole run fits inside OVHCloud's 1-hour billing window:
+#   provision (~5 min) + bench (~45 min) + teardown (~2 min) ≈ 52 min.
 #
-# Blacksmith dedicates capacity per runner family, so timings are stable
-# enough to compare across runs; still treat absolute numbers as
-# machine-relative and compare like-for-like.
+# ── Required secrets ────────────────────────────────────────────────────
+#   RUNNER_REGISTRATION_PAT  PAT with manage_runners:repo (or repo) scope.
+#                            Used to register the ephemeral OVH runner.
+#   OVH_OS_AUTH_URL          Keystone endpoint — https://auth.cloud.ovh.net/v3/
+#   OVH_OS_TENANT_ID         OVHCloud project UUID (visible in Horizon dashboard).
+#   OVH_OS_USERNAME          OpenStack username (format: user-XXXXXXXX).
+#   OVH_OS_PASSWORD          OpenStack password.
+# ────────────────────────────────────────────────────────────────────────
 
 on:
   workflow_dispatch:
     inputs:
+      flavor:
+        description: "OVHCloud instance flavor"
+        type: choice
+        options: [c2-7, c2-15, c2-30]
+        default: c2-15
+      region:
+        description: "OVHCloud region"
+        type: choice
+        options: [GRA11, SBG5, DE1, UK1, BHS5]
+        default: GRA11
       crates:
         description: "Space-separated crate names to bench (empty = --workspace)"
         type: string
         default: ""
 
+# Only one bench run at a time — ephmeral runners share the ovhcloud-bench
+# label pool and OVHCloud billing should stay within one instance per run.
 concurrency:
   group: bench
   cancel-in-progress: false
@@ -29,34 +44,63 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
-  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-
 jobs:
+  # ── 1. Provision ──────────────────────────────────────────────────────
+  provision:
+    name: provision (${{ inputs.flavor }}, ${{ inputs.region }})
+    runs-on: [self-hosted, linux, hetzner, gh-runner]
+    timeout-minutes: 10
+    outputs:
+      instance_id:  ${{ steps.spawn.outputs.instance_id }}
+      runner_label: ${{ steps.spawn.outputs.runner_label }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: spawn OVHCloud instance + register runner
+        id: spawn
+        env:
+          OS_AUTH_URL:             ${{ secrets.OVH_OS_AUTH_URL }}
+          OS_TENANT_ID:            ${{ secrets.OVH_OS_TENANT_ID }}
+          OS_USERNAME:             ${{ secrets.OVH_OS_USERNAME }}
+          OS_PASSWORD:             ${{ secrets.OVH_OS_PASSWORD }}
+          OS_REGION_NAME:          ${{ inputs.region }}
+          # OVHCloud OpenStack always uses these domain names.
+          OS_USER_DOMAIN_NAME:     Default
+          OS_PROJECT_DOMAIN_NAME:  Default
+          RUNNER_PAT:              ${{ secrets.RUNNER_REGISTRATION_PAT }}
+          GH_REPO:                 ${{ github.repository }}
+          RUN_ID:                  ${{ github.run_id }}
+          FLAVOR:                  ${{ inputs.flavor }}
+        run: bash install/github-runner/bench-provision.sh
+
+  # ── 2. Bench ──────────────────────────────────────────────────────────
   bench:
     name: criterion (${{ inputs.crates || 'workspace' }})
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    needs: provision
+    # Dynamic runner label created by the provision job.  The runner is
+    # ephemeral: it deregisters automatically after this one job completes.
+    runs-on:
+      - self-hosted
+      - linux
+      - ${{ needs.provision.outputs.runner_label }}
     timeout-minutes: 50
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
       - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/rust-deps
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: "v1"
-          shared-key: bench
-          cache-all-crates: "true"
+      - name: install build deps
+        run: |
+          command -v mold >/dev/null 2>&1 ||
+            sudo apt-get install -y --no-install-recommends clang mold
 
       - name: cargo bench (criterion)
         shell: bash
         run: |
-          set -euo pipefail
           if [ -n "${{ inputs.crates }}" ]; then
             ARGS=""
             for c in ${{ inputs.crates }}; do ARGS="$ARGS -p $c"; done
@@ -70,6 +114,7 @@ jobs:
       # AllocProfiler global doesn't interfere with criterion's timing.
       # `--features bench` required for crabcc-core divan targets.
       - name: cargo bench (divan alloc)
+        shell: bash
         run: |
           cargo bench -p wormhole-node --bench alloc_profile
           cargo bench -p crabcc-core  --bench alloc_ops --features bench
@@ -82,3 +127,35 @@ jobs:
           path: target/criterion/
           if-no-files-found: warn
           retention-days: 30
+
+  # ── 3. Teardown ───────────────────────────────────────────────────────
+  teardown:
+    name: teardown OVH instance
+    needs: [provision, bench]
+    # Always run — even if bench failed or timed out — so we never leak
+    # a running instance and accumulate unexpected OVHCloud charges.
+    if: always()
+    runs-on: [self-hosted, linux, hetzner, gh-runner]
+    timeout-minutes: 5
+    steps:
+      - name: delete instance
+        env:
+          OS_AUTH_URL:             ${{ secrets.OVH_OS_AUTH_URL }}
+          OS_TENANT_ID:            ${{ secrets.OVH_OS_TENANT_ID }}
+          OS_USERNAME:             ${{ secrets.OVH_OS_USERNAME }}
+          OS_PASSWORD:             ${{ secrets.OVH_OS_PASSWORD }}
+          OS_REGION_NAME:          ${{ inputs.region }}
+          OS_USER_DOMAIN_NAME:     Default
+          OS_PROJECT_DOMAIN_NAME:  Default
+          INSTANCE_ID:             ${{ needs.provision.outputs.instance_id }}
+        shell: bash
+        run: |
+          if [ -z "${INSTANCE_ID:-}" ]; then
+            echo "no instance_id — provision did not complete, nothing to delete"
+            exit 0
+          fi
+          echo "Deleting instance ${INSTANCE_ID}..."
+          command -v openstack >/dev/null 2>&1 ||
+            sudo apt-get install -y --no-install-recommends python3-openstackclient -qq
+          openstack server delete "${INSTANCE_ID}" --wait
+          echo "Instance ${INSTANCE_ID} deleted — billing stopped"

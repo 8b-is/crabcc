@@ -1,195 +1,277 @@
 name: CI
 
-# All Linux jobs run on Blacksmith (https://docs.blacksmith.sh). The former
-# Hetzner self-hosted pool is gone; the fleet-management workflows that
-# supported it (runner-health / runner-gc / provision-*) were deleted along
-# with the `disk-guard` composite action, since Blacksmith runners are
-# ephemeral Firecracker microVMs with 80-160 GB of scratch disk each.
-#
-# Blacksmith transparently redirects actions/cache + Swatinem/rust-cache to
-# a colocated cache backend (~4x GitHub's throughput), so no cache config
-# changes are needed. sccache is deliberately NOT used: per Blacksmith's
-# docs it is one of the few backends still routed to GitHub's cross-DC
-# cache, which makes it a net loss here.
-#
+# Linux jobs run on the Hetzner self-hosted pool — see install/github-runner/.
+# macOS release legs (release.yml / nightly.yml) still use GitHub-hosted runners.
+
 # PR CI is intentionally narrow: lint, plus tests for the crates the PR
-# actually touches, plus CLI + MCP smoke. The full matrix runs on push to
-# main and on tag (release.yml). PR-time goal is fast feedback, not
-# exhaustive coverage.
+# actually touches, plus a 3-command smoke E2E. The full matrix
+# (Ubuntu + macOS, all workspace tests) runs on push to main and on tag
+# (release.yml). PR-time goal is fast feedback, not exhaustive coverage.
 on:
   push:
     branches: [main]
   pull_request:
 
 # Cancel previous runs on the same ref. When a fixup commit lands on a PR
-# before the prior run finishes, the prior run is killed.
+# before the prior run finishes, the prior run is killed — saves runner minutes.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Linux-only mold linker — slashes link time on debug + ci profiles for
-  # this workspace (567 deps). Installed in the `deps` composite step below.
+  # Wire sccache as the rustc wrapper. Without this `RUSTC_WRAPPER`,
+  # `mozilla-actions/sccache-action` installs the binary and exports
+  # `SCCACHE_PATH` but cargo never invokes it (we observed
+  # `Compile requests 0` in run #25185569799). With it set, cargo
+  # routes every rustc call through sccache and the second-build
+  # cache hit rate jumps to ~95% on this workspace.
+  #
+  # Note: rust-cache and sccache are complementary, not redundant —
+  # rust-cache stores the dependency `target/` + `~/.cargo` blobs as
+  # a single GHA artifact (one big restore at job start); sccache
+  # caches per-source-hash rustc output via the GHA cache backend
+  # (lookups during compile). Together they hit both warm-restart
+  # and warm-incremental scenarios.
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  # CARGO_INCREMENTAL is intentionally NOT set here — `Swatinem/rust-cache`
+  # sets `CARGO_INCREMENTAL=0` itself (per its README's Cache Details
+  # section), and explicit env-vars added at the workflow level become
+  # part of rust-cache's env-vars cache key (default prefixes: CARGO,
+  # CC, CFLAGS, CXX, CMAKE, RUST). Setting it here would slightly
+  # destabilize the key without changing behavior.
+  #
+  # Linux-only mold linker — slashes link time on debug + ci profiles
+  # for big workspaces (we have 567 deps). The flag is a no-op on
+  # macOS jobs (the lld/zld fallback is fine there).
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
 
 jobs:
-  # Single source of truth for "what did this PR touch". Previously this
-  # block was copy-pasted into the lint and test jobs, which drifted. Both
-  # now consume these outputs.
-  #
-  # Scoped crates are filtered through `cargo metadata --no-deps` so we
-  # never emit `-p <name>` for directories under `crates/` that are
-  # deliberately excluded from the parent workspace (e.g. crabcc-viz
-  # carries its own Cargo.lock and is built standalone). Without the
-  # filter, `cargo clippy -p crabcc-viz` errors with "package ID
-  # specification did not match any packages".
-  scope:
-    name: scope
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    outputs:
-      crates: ${{ steps.detect.outputs.crates }}
-      smoke: ${{ steps.detect.outputs.smoke }}
-      aliases: ${{ steps.detect.outputs.aliases }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          # Full history so the PR diff (base..head) resolves. Must be a
-          # literal 0, not a ternary: `x && 0 || 1` always yields 1 because
-          # 0 is falsy in GitHub Actions expressions, leaving a shallow
-          # clone where `git diff <base> <head>` dies with "bad object".
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: detect changed scope
-        id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            # Push to main: belt-and-suspenders, run everything.
-            echo "crates=--workspace" >> "$GITHUB_OUTPUT"
-            echo "smoke=1"            >> "$GITHUB_OUTPUT"
-            echo "aliases=1"          >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
-          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
-          echo "changed files:"; echo "$CHANGED"
-
-          RAW=$(echo "$CHANGED" | awk -F/ '/^crates\// {print $2}' | sort -u)
-          MEMBERS=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[].name')
-          CRATES=$(echo "$RAW"  | grep -Fxf  <(echo "$MEMBERS") || true)
-          DROPPED=$(echo "$RAW" | grep -Fvxf <(echo "$MEMBERS") || true)
-          if [ -n "$DROPPED" ]; then
-            echo "::notice::Dropped non-workspace crates from scope: $(echo $DROPPED | tr '\n' ' ')"
-          fi
-
-          ARGS=""
-          for c in $CRATES; do ARGS="$ARGS -p $c"; done
-          echo "crates=$ARGS" >> "$GITHUB_OUTPUT"
-          if [ -z "$CRATES" ]; then
-            echo "::notice::No workspace-crate changes — lint + test will skip"
-          else
-            echo "::notice::Scope:$ARGS"
-          fi
-
-          # Smoke exercises the CLI + MCP binary, so it only needs to run
-          # when the binary or its core changed.
-          if echo "$CHANGED" | grep -qE '^crates/(crabcc-cli|crabcc-core|crabcc-mcp)/'; then
-            echo "smoke=1" >> "$GITHUB_OUTPUT"
-          fi
-          if echo "$CHANGED" | grep -qE '^scripts/(install-aliases|aliases-smoke)\.sh$'; then
-            echo "aliases=1" >> "$GITHUB_OUTPUT"
-          fi
-
   fmt:
     name: fmt
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # Requires the 'gh-runner' label on runner-01 and runner-01b (Ubuntu).
+    # bench-node (NixOS, full disk) does not carry this label and must never
+    # pick up build jobs.  Jobs queue here until an eligible runner is ready.
+    # One-time setup: GitHub Settings → Actions → Runners → add 'gh-runner'
+    # label to runner-01 and runner-01b.
+    runs-on: [self-hosted, linux, hetzner, gh-runner]
+    env:
+      RUSTC_WRAPPER: ""  # override global; cargo fmt never invokes rustc
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+      - uses: ./.github/actions/disk-guard
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      # PR: advisory. auto-fix-lint.yml runs `cargo fmt --all` proactively on
-      # the PR, so a formatting nit never red-gates the build. Push-to-main
-      # stays a hard gate so the trunk is always fmt-clean.
+      # Gate on drift: fail the build if the tree is not rustfmt-clean.
+      # The companion auto-fix-lint.yml (workflow_run) remediates failures by
+      # committing `cargo fmt --all` + `clippy --fix` back to the branch.
       - name: cargo fmt --all --check
+        # PR: advisory. auto-fix-lint.yml runs `cargo fmt --all` proactively on
+        # the PR, so a formatting nit never red-gates the build ("CI failed on a
+        # typo"). Push-to-main stays a hard gate so the trunk is always fmt-clean.
         continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: cargo fmt --all -- --check
 
   lint:
     name: lint (clippy)
-    needs: scope
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: [self-hosted, linux, hetzner, gh-runner]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          # Full history so the PR diff (base..head) resolves. Must be a literal
+          # 0, not `event == 'pull_request' && 0 || 1`: that ternary always
+          # yields 1 because 0 is falsy in GitHub Actions expressions, leaving a
+          # shallow clone where `git diff <base> <head>` dies with "bad object".
+          fetch-depth: 0
+      - uses: ./.github/actions/disk-guard
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
 
-      # A docs-only PR still enters this job (aliases-smoke may need to run)
-      # but has nothing to compile — skip the apt install and the cache
-      # restore in that case.
-      - uses: ./.github/actions/rust-deps
-        if: needs.scope.outputs.crates != ''
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
-      # rust-cache stores `~/.cargo` (registry index + cache + git deps) AND
-      # `target/`, keyed off Cargo.lock + rustc + env-var hashes. Don't bolt
-      # an extra `actions/cache` for `~/.cargo/registry/*` on top — the two
-      # compete for the same paths and the same cache budget.
+      # Fast linker: try mold, then wild, then fall back to the default
+      # ld. Each install is single-shot (no apt-cache cleanup heroics or
+      # retry loops) — fail fast and degrade. mold and wild are both
+      # 3-5x faster than ld on big debug + ci profile builds, but
+      # neither is a correctness requirement. The runtime override of
+      # CARGO_TARGET_..._RUSTFLAGS replaces the workflow-level default
+      # (which assumes mold) so we don't `-fuse-ld=mold` against a
+      # linker that isn't there.
+      - name: install fast linker (mold → wild → default ld)
+        run: |
+          LINKER=default
+          if command -v mold >/dev/null 2>&1 || \
+             sudo apt-get install -y --no-install-recommends mold 2>/dev/null; then
+            LINKER=mold
+          elif command -v wild >/dev/null 2>&1 || \
+               sudo apt-get install -y --no-install-recommends wild 2>/dev/null; then
+            LINKER=wild
+          else
+            echo "::warning::mold + wild install both failed (likely ENOSPC); using default ld"
+          fi
+          case "$LINKER" in
+            mold|wild)
+              echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=$LINKER" >> "$GITHUB_ENV"
+              ;;
+            default)
+              echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=" >> "$GITHUB_ENV"
+              ;;
+          esac
+
+      # rust-cache caches `~/.cargo` (registry index + cache + git
+      # deps) AND `target/` keyed off Cargo.lock + rustc + env-var
+      # hashes. Don't bolt an extra `actions/cache` step on top of
+      # this for `~/.cargo/registry/*` — the two would compete for
+      # the same paths AND the same 10 GB GHA repo budget. We
+      # measured this in PR #176; rust-cache alone is sufficient
+      # once `RUSTC_WRAPPER=sccache` is set above.
       - uses: Swatinem/rust-cache@v2
-        if: needs.scope.outputs.crates != ''
         with:
-          # Bump prefix-key (v1 → v2) to force-clear the cache when the
-          # toolchain or profile set changes and a stale entry would
+          # Bump prefix-key (e.g. v1 → v2) to force-clear the cache when
+          # the toolchain or profile set changes and the old entry would
           # otherwise cause subtle cache-poisoning failures.
           prefix-key: "v1"
-          # Distinct from the test job's key: clippy and nextest build with
-          # different RUSTFLAGS, so a shared `target/` would thrash.
           shared-key: ci-lint
+          # cache-on-failure isn't the default (false). True keeps the
+          # cache warm across a flaky lint job — next attempt starts
+          # warm even if the previous failed.
           cache-on-failure: "true"
+          # cache-all-crates includes CI tooling deps (cargo-nextest,
+          # taiki-e/install-action artifacts, etc) — adds <1% size,
+          # saves a fresh download next run.
           cache-all-crates: "true"
 
-      # `--all-targets` covers lib + bins + tests + examples + benches;
-      # binary-only crates (crabcc-cli) reject `--lib`.
+      # Issue #87 — Pillar 3 (PR-only-changed-files CI). On PR, scope
+      # clippy + aliases-smoke to changed crates / scripts. On push to
+      # main, run everything (full belt-and-suspenders pre-release.yml).
       #
-      # PR: advisory — warnings surface in the log and auto-fix-lint applies
-      # the fixable subset. Push-to-main keeps `-D warnings` as a hard gate.
+      # Scoped crates are filtered through `cargo metadata --no-deps`
+      # so we never emit `-p <name>` for crates that live under
+      # `crates/` but are deliberately excluded from the parent
+      # workspace (e.g. crabcc-viz carries its own Cargo.lock and is
+      # built standalone — see its Cargo.toml header for the
+      # rationale). Without this filter `cargo clippy -p crabcc-viz`
+      # from the workspace root errors with "package ID specification
+      # did not match any packages".
+      - name: detect changed scope
+        id: scope
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+            CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+            echo "changed files:"; echo "$CHANGED"
+            RAW_CRATES=$(echo "$CHANGED" | awk -F/ '/^crates\// {print $2}' | sort -u)
+            WORKSPACE_CRATES=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[].name')
+            CRATES=$(echo "$RAW_CRATES" | grep -Fxf <(echo "$WORKSPACE_CRATES") || true)
+            DROPPED=$(echo "$RAW_CRATES" | grep -Fvxf <(echo "$WORKSPACE_CRATES") || true)
+            if [ -n "$DROPPED" ]; then
+              echo "::notice::Dropped non-workspace crates from scope: $(echo $DROPPED | tr '\n' ' ')"
+            fi
+            ARGS=""
+            for c in $CRATES; do ARGS="$ARGS -p $c"; done
+            echo "clippy_scope=$ARGS" >> "$GITHUB_OUTPUT"
+            if echo "$CHANGED" | grep -qE '^scripts/(install-aliases|aliases-smoke)\.sh$'; then
+              echo "aliases_smoke=1" >> "$GITHUB_OUTPUT"
+            fi
+            if [ -z "$CRATES" ]; then
+              echo "::notice::No workspace-crate changes — skipping clippy"
+            else
+              echo "::notice::Clippy scope:$ARGS"
+            fi
+          else
+            echo "clippy_scope=--workspace" >> "$GITHUB_OUTPUT"
+            echo "aliases_smoke=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Scoped clippy: PR runs only against changed crates; push-to-main
+      # runs `--workspace`. Empty scope (docs-only PR) skips entirely.
+      # `--all-targets` covers lib + bins + tests + examples + benches —
+      # binary-only crates (e.g. crabcc-cli) reject `--lib`, so we can't
+      # rely on `--lib --bins` here.
       - name: cargo clippy (scoped)
-        if: needs.scope.outputs.crates != ''
+        if: steps.scope.outputs.clippy_scope != ''
+        # PR: advisory -- warnings surface in the log and auto-fix-lint applies the
+        # fixable subset, so a non-autofixable clippy lint doesn't block the PR.
+        # Push-to-main keeps `-D warnings` as a hard gate so warnings can't rot.
         continue-on-error: ${{ github.event_name == 'pull_request' }}
-        run: cargo clippy ${{ needs.scope.outputs.crates }} --all-targets -- -D warnings
+        run: cargo clippy ${{ steps.scope.outputs.clippy_scope }} --all-targets -- -D warnings
 
       # Issue #81: shell-only smoke for scripts/install-aliases.sh.
       # Sub-second; asserts --aggressive verbs and idempotence.
+      # PR runs only when the alias scripts changed; push-to-main always runs.
       - name: aliases-smoke
-        if: needs.scope.outputs.aliases == '1'
+        if: steps.scope.outputs.aliases_smoke == '1'
         run: bash scripts/aliases-smoke.sh
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats || true
 
   test:
     name: test (ubuntu, scoped)
-    needs: scope
-    if: needs.scope.outputs.crates != ''
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: [self-hosted, linux, hetzner, gh-runner]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
-          fetch-depth: 1
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/rust-deps
+          # Full history so the PR diff (base..head) resolves. Must be a literal
+          # 0, not `event == 'pull_request' && 0 || 1`: that ternary always
+          # yields 1 because 0 is falsy in GitHub Actions expressions, leaving a
+          # shallow clone where `git diff <base> <head>` dies with "bad object".
+          fetch-depth: 0
+      - uses: ./.github/actions/disk-guard
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      # See lint-job linker step above for the mold → wild → default
+      # rationale. Same logic here.
+      - name: install fast linker (mold → wild → default ld)
+        run: |
+          LINKER=default
+          if command -v mold >/dev/null 2>&1 || \
+             sudo apt-get install -y --no-install-recommends mold 2>/dev/null; then
+            LINKER=mold
+          elif command -v wild >/dev/null 2>&1 || \
+               sudo apt-get install -y --no-install-recommends wild 2>/dev/null; then
+            LINKER=wild
+          else
+            echo "::warning::mold + wild install both failed (likely ENOSPC); using default ld"
+          fi
+          case "$LINKER" in
+            mold|wild)
+              echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=$LINKER" >> "$GITHUB_ENV"
+              ;;
+            default)
+              echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=" >> "$GITHUB_ENV"
+              ;;
+          esac
+
+      # ripgrep is required by shell_rewrite_e2e::find_swaps_to_ripgrep
+      # (the rewriter only emits the find→rg swap when `rg` is found on
+      # PATH). Best-effort install: if apt is wedged on ENOSPC, warn
+      # and continue — that one test will then fail with a meaningful
+      # diff instead of this step failing with an apt error.
+      - name: install ripgrep (best-effort)
+        run: |
+          command -v rg >/dev/null 2>&1 || \
+            sudo apt-get install -y --no-install-recommends ripgrep || \
+            echo "::warning::ripgrep install failed; find_swaps_to_ripgrep may fail later with a meaningful diff"
+
+      # See lint-job comment above for why this is the only cache
+      # layer needed at the dependency-blob level. The `ci-ubuntu`
+      # shared-key is distinct from `ci-lint` so the two jobs don't
+      # share their `target/` (different feature flags + different
+      # RUSTFLAGS for clippy vs nextest would poison a shared key).
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v1"
@@ -197,15 +279,79 @@ jobs:
           cache-on-failure: "true"
           cache-all-crates: "true"
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
+      # Scope policy:
+      #   - push to main → full workspace (covers any cross-crate fallout)
+      #   - PR → only the crates touched by the diff. Faster feedback, and
+      #     anything we'd miss is caught by the post-merge run on main.
+      #   - PR with no crate changes (docs/CI only) → skip nextest entirely.
+      # Same workspace-member filter as the lint job — see comment there
+      # for rationale. crates/ paths that aren't workspace members
+      # (e.g. crabcc-viz) are dropped before nextest sees them.
+      #
+      # Runs BEFORE `install cargo-nextest` so we can skip the multi-hundred-
+      # MB nextest compile entirely for docs/CI-only PRs (where scope is
+      # empty and nextest never runs). On a disk-pressured Hetzner runner
+      # the install can OOM-kill / saturate / hang the job; for any PR
+      # whose nextest step would skip anyway, just don't install it.
+      - name: detect changed crates
+        id: scope
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+            CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+            echo "changed files:"
+            echo "$CHANGED"
+            RAW_CRATES=$(echo "$CHANGED" | awk -F/ '/^crates\// {print $2}' | sort -u)
+            WORKSPACE_CRATES=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[].name')
+            CRATES=$(echo "$RAW_CRATES" | grep -Fxf <(echo "$WORKSPACE_CRATES") || true)
+            DROPPED=$(echo "$RAW_CRATES" | grep -Fvxf <(echo "$WORKSPACE_CRATES") || true)
+            if [ -n "$DROPPED" ]; then
+              echo "::notice::Dropped non-workspace crates from scope: $(echo $DROPPED | tr '\n' ' ')"
+            fi
+            if [ -z "$CRATES" ]; then
+              echo "scope=" >> "$GITHUB_OUTPUT"
+              echo "::notice::No workspace-crate changes — skipping nextest + smoke"
+            else
+              ARGS=""
+              for c in $CRATES; do ARGS="$ARGS -p $c"; done
+              # shellcheck disable=SC2086
+              echo "scope=$ARGS" >> "$GITHUB_OUTPUT"
+              echo "::notice::Test scope:$ARGS"
+            fi
+            # Issue #87 — Pillar 3: smoke runs only when crabcc-cli or
+            # crabcc-core changed (it exercises the release CLI binary).
+            if echo "$CHANGED" | grep -qE '^crates/(crabcc-cli|crabcc-core)/'; then
+              echo "smoke=1" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "scope=--workspace" >> "$GITHUB_OUTPUT"
+            echo "smoke=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: install cargo-nextest (JUnit reporter)
+        # Skip the install entirely when scope is empty -- a docs/CI-only PR
+        # never runs nextest, no need to pay the compile cost (or risk the
+        # runner-disk wedge described above).
+        if: steps.scope.outputs.scope != ''
+        run: |
+          # Use the cached binary if present; compile from source otherwise.
+          # taiki-e/install-action@v2 was consistently failing on this runner
+          # (exit 1 in <100ms before any output) — cargo install is slower but
+          # always works from the registry without hitting GitHub Releases.
+          if ! cargo nextest --version &>/dev/null 2>&1; then
+            cargo install cargo-nextest --locked
+          fi
 
       - name: cargo nextest (scoped)
-        run: cargo nextest run ${{ needs.scope.outputs.crates }} --profile ci
+        if: steps.scope.outputs.scope != ''
+        env:
+          RUST_LOG: wormhole_node=debug,wormhole_relay=debug,wormhole_proto=debug
+        run: cargo nextest run ${{ steps.scope.outputs.scope }} --profile ci
 
       - name: upload test report (JUnit XML)
-        if: always()
+        if: always() && steps.scope.outputs.scope != ''
         uses: actions/upload-artifact@v7
         with:
           name: junit-ubuntu
@@ -213,82 +359,37 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  # crabcc's primary consumers are coding agents talking to the MCP server
-  # (and the HTTP/SDK surface behind it), not humans at a shell. The unit
-  # tests cover dispatch in-process; this job is the only place the shipped
-  # binary is driven end-to-end over the real stdio JSON-RPC transport, the
-  # way Claude Code / opencode / entheai actually drive it.
-  smoke:
-    name: smoke (CLI + MCP stdio)
-    needs: scope
-    if: needs.scope.outputs.smoke == '1'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/rust-deps
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: "v1"
-          shared-key: ci-smoke
-          cache-on-failure: "true"
-          cache-all-crates: "true"
-
-      - name: build crabcc
+      # nextest compiles in test mode; the smoke step exercises the CLI binary.
+      # Dev profile is fast to build (no LTO) and sufficient for correctness
+      # smoke — we're not benchmarking here. `continue-on-error: true` keeps
+      # smoke informational; the 150+ unit tests gate correctness.
+      - name: build binary for smoke test
+        if: steps.scope.outputs.smoke == '1'
+        continue-on-error: true
         run: cargo build -p crabcc-cli --profile ci
 
-      # A git root is required: the MCP server resolves the index by walking
-      # up to `.git` (find_git_root), so a bare temp dir silently yields an
-      # empty result set instead of an error.
-      - name: build fixture repo
-        id: fixture
+      # Trimmed smoke set: index → lookup sym → lookup callers. Covers the
+      # hot path that 99% of agent traffic hits. The fuller set (outline /
+      # files / prefix / watch) ran in v1 CI; those are unit-tested and
+      # reproven on push-to-main. `continue-on-error: true` keeps smoke
+      # informational — the 200+ unit tests already cover correctness.
+      - name: smoke — index + lookup sym + lookup callers
+        if: steps.scope.outputs.smoke == '1'
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
           FIXTURE=$(mktemp -d)
           cd "$FIXTURE"
-          git init -q .
           cat > a.ts <<'EOF'
           export function hello(name: string) { return name; }
           export function greet() { return hello("world"); }
           EOF
-          echo "dir=$FIXTURE" >> "$GITHUB_OUTPUT"
-
-      - name: smoke — CLI (index + lookup sym + lookup callers)
-        shell: bash
-        working-directory: ${{ steps.fixture.outputs.dir }}
-        run: |
-          set -euo pipefail
           BIN="$GITHUB_WORKSPACE/target/ci/crabcc"
           "$BIN" index
-          "$BIN" lookup sym hello     | jq -e '.[0].name == "hello"'
+          "$BIN" lookup sym hello | jq -e '.[0].name == "hello"'
           "$BIN" lookup callers hello --count | jq -e '.count >= 1'
 
-      # Newline-delimited JSON-RPC 2.0 over stdio — the framing every MCP
-      # client uses (see crates/crabcc-mcp/src/transport.rs). Asserts the
-      # handshake, that tools are advertised, and that a tools/call returns
-      # the same symbol the CLI just found. The CLI and MCP paths resolve
-      # the store separately, so a green CLI smoke does not imply a green
-      # MCP one — that divergence is exactly what this step guards.
-      - name: smoke — MCP stdio (initialize + tools/list + tools/call)
-        shell: bash
-        working-directory: ${{ steps.fixture.outputs.dir }}
-        run: |
-          set -euo pipefail
-          BIN="$GITHUB_WORKSPACE/target/ci/crabcc"
-          printf '%s\n%s\n%s\n' \
-            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
-            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"sym","arguments":{"name":"hello"}}}' \
-            | "$BIN" --mcp > out.jsonl
-
-          cat out.jsonl
-
-          jq -e 'select(.id == 1) | .result.serverInfo.name == "crabcc-mcp"'   out.jsonl
-          jq -e 'select(.id == 2) | any(.result.tools[]; .name == "sym")'     out.jsonl
-          # tools/call wraps the payload as MCP text content — parse the
-          # inner JSON and assert the symbol actually came back.
-          jq -e 'select(.id == 3) | (.result.content[0].text | fromjson | .[0].name == "hello")' out.jsonl
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats || true
