@@ -997,7 +997,6 @@ version = "6.5.11"
 dependencies = [
  "ahash",
  "anyhow",
- "clap",
  "crabcc-memory",
  "reqwest 0.13.1",
  "serde",
@@ -1008,7 +1007,6 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
