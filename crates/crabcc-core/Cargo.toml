@@ -73,7 +73,7 @@ divan = { workspace = true }
 # doesn't compile or run them.
 testcontainers = "0.27"
 testcontainers-modules = { version = "0.15", features = ["redis"] }
-serial_test = "3"
+serial_test = "4"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 # Wired now so `cargo bench` finds Agent C's harness once `benches/symbols.rs`
