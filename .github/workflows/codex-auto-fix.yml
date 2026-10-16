@@ -278,10 +278,12 @@ jobs:
           PROMPT
           sed -i "s/__PR__/${{ matrix.pr }}/g" /tmp/codex-prompt.md
 
-          # exec = noninteractive single-shot. --full-auto auto-approves the
-          # sandbox tool calls; --skip-git-repo-check disables the
-          # "not a git repo" safety prompt (we just cloned, it's fine).
-          codex exec --full-auto --skip-git-repo-check \
+          # exec = noninteractive single-shot. `--full-auto` no longer exists
+          # on Codex >= 0.59; `--sandbox workspace-write` is its successor —
+          # approval requests route through automatic review within the
+          # workspace. --skip-git-repo-check disables the "not a git repo"
+          # safety prompt (we just cloned, it's fine).
+          codex exec --sandbox workspace-write --skip-git-repo-check \
             "$(cat /tmp/codex-prompt.md)" 2>&1 | tee /tmp/codex-run.log
 
       - name: Push commits
