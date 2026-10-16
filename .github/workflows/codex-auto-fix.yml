@@ -102,12 +102,12 @@ jobs:
               if [ -n "${INPUT_PR:-}" ]; then
                 echo "prs=[\"$INPUT_PR\"]" >> "$GITHUB_OUTPUT"
               else
-                prs=$(gh pr list --state open --json number --jq '[.[].number | tostring]')
+                prs=$(gh pr list --repo "${{ github.repository }}" --state open --json number --jq '[.[].number | tostring]')
                 echo "prs=$prs" >> "$GITHUB_OUTPUT"
               fi
               ;;
             schedule)
-              prs=$(gh pr list --state open --json number --jq '[.[].number | tostring]')
+              prs=$(gh pr list --repo "${{ github.repository }}" --state open --json number --jq '[.[].number | tostring]')
               echo "prs=$prs" >> "$GITHUB_OUTPUT"
               ;;
             *)
@@ -132,7 +132,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          meta=$(gh pr view ${{ matrix.pr }} \
+          meta=$(gh pr view ${{ matrix.pr }} --repo "${{ github.repository }}" \
             --json headRefName,headRefOid,state,isDraft,headRepositoryOwner,headRepository)
           state=$(echo "$meta" | jq -r '.state')
           draft=$(echo "$meta" | jq -r '.isDraft')
@@ -347,4 +347,4 @@ jobs:
             printf ' &middot; model: `gpt-5.5` (high)_\n'
           } > /tmp/codex-comment.md
 
-          gh pr comment ${{ matrix.pr }} --body-file /tmp/codex-comment.md
+          gh pr comment ${{ matrix.pr }} --repo "${{ github.repository }}" --body-file /tmp/codex-comment.md
