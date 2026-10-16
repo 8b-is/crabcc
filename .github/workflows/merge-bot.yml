@@ -99,7 +99,7 @@ jobs:
             NOW=$(date -u +%s)
             one_hour_ago=$(( NOW - 3600 ))
             five_min_ago=$(( NOW - 300 ))
-            gh pr list --state open --limit 100 \
+            gh pr list --repo "$REPO" --state open --limit 100 \
               --json number,createdAt,updatedAt,isDraft,labels,reviewRequests \
               --jq '
                 .[] |
@@ -169,10 +169,10 @@ jobs:
             else
               recap="merge-bot merging — CI green on first pass, no auto-fix needed."
             fi
-            gh pr comment "$pr" --body "$recap" || true
+            gh pr comment "$pr" --repo "$REPO" --body "$recap" || true
             local tok=${MERGE_TOKEN:-$GH_TOKEN}
-            GH_TOKEN=$tok gh pr merge "$pr" --squash --delete-branch --admin 2>/tmp/merge.err \
-              || GH_TOKEN=$tok gh pr merge "$pr" --squash --delete-branch 2>>/tmp/merge.err \
+            GH_TOKEN=$tok gh pr merge "$pr" --repo "$REPO" --squash --delete-branch --admin 2>/tmp/merge.err \
+              || GH_TOKEN=$tok gh pr merge "$pr" --repo "$REPO" --squash --delete-branch 2>>/tmp/merge.err \
               || { echo "::warning::merge failed for PR #$pr"; cat /tmp/merge.err; return 1; }
           }
 
@@ -190,16 +190,16 @@ jobs:
             # comment and lets the workflow's own queueing handle codex's
             # runtime. codex-auto-fix.yml writes the `[codex-fix] ...` commit
             # that our attempt counter keys off.
-            gh workflow run codex-auto-fix.yml \
+            gh workflow run codex-auto-fix.yml --repo "$REPO" \
               -f pr="$pr" 2>/tmp/wf.err \
               || { echo "::warning::codex-auto-fix dispatch failed for PR #$pr"; cat /tmp/wf.err; return 1; }
             # Leave a minimal trail on the PR so reviewers see the loop.
-            gh pr comment "$pr" --body "merge-bot: dispatched codex auto-fix (attempt $attempt of $MAX_FIX_ATTEMPTS). Watching for the next CI cycle." || true
+            gh pr comment "$pr" --repo "$REPO" --body "merge-bot: dispatched codex auto-fix (attempt $attempt of $MAX_FIX_ATTEMPTS). Watching for the next CI cycle." || true
           }
 
           act_bail_attempts() {
             local pr=$1 fix_count=$2
-            gh pr edit "$pr" --add-label "needs-manual-attention" 2>/dev/null || true
+            gh pr edit "$pr" --repo "$REPO" --add-label "needs-manual-attention" 2>/dev/null || true
             local body
             body=$(cat <<'EOF'
           merge-bot: bailing after __MAX_ATTEMPTS__ auto-fix attempts. CI is still red, so the residual issues are presumed medium/major bugs that need human review.
@@ -210,13 +210,13 @@ jobs:
           EOF
           )
             body=${body//__MAX_ATTEMPTS__/$MAX_FIX_ATTEMPTS}
-            gh pr comment "$pr" --body "$body" || true
+            gh pr comment "$pr" --repo "$REPO" --body "$body" || true
           }
 
           act_bail_conflict() {
             local pr=$1
-            gh pr edit "$pr" --add-label "needs-manual-rebase" 2>/dev/null || true
-            gh pr comment "$pr" --body "merge-bot: bailing — merge conflicts with \`main\` that I won't try to auto-resolve. Rebase manually and the bot will pick it back up." || true
+            gh pr edit "$pr" --repo "$REPO" --add-label "needs-manual-rebase" 2>/dev/null || true
+            gh pr comment "$pr" --repo "$REPO" --body "merge-bot: bailing — merge conflicts with \`main\` that I won't try to auto-resolve. Rebase manually and the bot will pick it back up." || true
           }
 
           # ---------------- main loop ----------------
@@ -225,7 +225,7 @@ jobs:
             echo
             echo "================== PR #$PR =================="
 
-            meta=$(gh pr view "$PR" --json \
+            meta=$(gh pr view "$PR" --repo "$REPO" --json \
               number,state,isDraft,mergeable,mergeStateStatus,headRefName,headRefOid,baseRefName,statusCheckRollup,reviewDecision,labels,title,url 2>/dev/null) \
               || { echo "fetch failed; skip"; continue; }
 
