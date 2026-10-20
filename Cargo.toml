@@ -78,7 +78,7 @@ rmp-serde = "1"
 flate2 = "1"
 bumpalo = { version = "3", features = ["collections"] }
 moka = { version = "0.12", features = ["sync"] }
-fastembed = "5"
+fastembed = "7"
 tiny_http = "0.12"
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
 serde_yml = "0.0.13"
