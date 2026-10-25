@@ -2,6 +2,11 @@
 # Compiled from scripts/amber/bg-compute.ab
 # amber build scripts/amber/bg-compute.ab scripts/amber/bg-compute.sh --minify
 #
+# NOTE (2026-10-25): `amber build` currently fails on this source with
+# "Unclosed string literal" at EOF, on the unmodified file as well as on edits,
+# so the generated shell is maintained by hand until the parser is fixed. The
+# arrays below must stay in sync with NAMES/ARGS in bg-compute.ab.
+#
 # Run detached: bash scripts/amber/bg-compute.sh &
 # Or blocking:  bash scripts/amber/bg-compute.sh
 set -euo pipefail
@@ -16,16 +21,15 @@ if [ -n "${relay_0}" ]; then
     echo "bg-compute: relay=${relay_0} — Wave 3 NodeCmd::Spawn pending; running locally"
 fi
 
-NAMES=("workspace" "alloc" "simd")
+NAMES=("workspace" "simd")
 ARGS=(
     "--workspace"
-    "-p wormhole-node --bench alloc_profile"
     "-p crabcc-core --features bench --bench compress_simd"
 )
 
 # Fan-out: start all benches concurrently, exit code written to .exit sentinel
 declare -a pids=()
-for i in 0 1 2; do
+for i in 0 1; do
     name="${NAMES[$i]}"
     log=".dev-tasks/bench-${name}.log"
     # shellcheck disable=SC2086
