@@ -42,8 +42,11 @@ jobs:
         # codspeed-divan-compat is a drop-in shim: it re-exports divan's
         # #[divan::bench] macros but routes measurements through CodSpeed's
         # valgrind runner instead of the wall-clock profiler.
+        # The pin must name a published major: crates.io carries 4.x, 5.x and
+        # 6.x, and the old `@2` made `cargo add` abort before any benchmark
+        # ran, which is why this advisory lane read as a hard failure.
         run: |
-          cargo add codspeed-divan-compat@2 \
+          cargo add codspeed-divan-compat@6 \
             --dev -p ${{ matrix.crate }} \
             --rename divan
 
