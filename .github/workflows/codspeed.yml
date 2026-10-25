@@ -27,9 +27,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - crate: wormhole-node
-            bench: alloc_profile
-            features: ""
           - crate: crabcc-core
             bench: alloc_ops
             features: "--features bench"

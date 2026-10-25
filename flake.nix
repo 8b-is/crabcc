@@ -91,57 +91,23 @@
         # pull it from llm-agents.nix when available.
         agentTools = lib.optional (agents ? rtk) agents.rtk;
 
-        # ── wormhole packages (crane + fenix nightly) ──────────────────────────
-        # Use the latest nightly — matches `channel = "nightly"` in rust-toolchain.toml.
-        # For a reproducible pin, replace with fenix.packages.${system}.fromToolchainFile.
-        nightlyToolchain = fenix.packages.${system}.complete.toolchain;
-        craneLib = (crane.mkLib pkgs).overrideToolchain nightlyToolchain;
-
-        wormholeSrc = craneLib.cleanCargoSource ./.;
-
-        wormholeArgs = {
-          src = wormholeSrc;
-          strictDeps = true;
-          buildInputs = with pkgs;
-            [ openssl ]
-            ++ lib.optionals stdenv.isDarwin [
-              darwin.apple_sdk.frameworks.Security
-              darwin.apple_sdk.frameworks.SystemConfiguration
-            ];
-          nativeBuildInputs = with pkgs; [ pkg-config ];
-        };
-
-        # Build shared workspace deps once; reused by relay + node builds.
-        wormholeDeps = craneLib.buildDepsOnly wormholeArgs;
-
-        wormhole-relay = craneLib.buildPackage (wormholeArgs // {
-          cargoArtifacts = wormholeDeps;
-          cargoExtraArgs = "-p wormhole-relay --bin wormhole-relay";
-          meta.mainProgram = "wormhole-relay";
-        });
-
-        wormhole-node = craneLib.buildPackage (wormholeArgs // {
-          cargoArtifacts = wormholeDeps;
-          cargoExtraArgs = "-p wormhole-node --bin wormhole-node";
-          meta.mainProgram = "wormhole-node";
-        });
+        # crane + fenix are still declared as flake inputs but are no longer
+        # used: their only consumer was the wormhole build, whose crates were
+        # trimmed out of the workspace in #767. Drop both inputs with the next
+        # `nix flake lock` — keeping them costs a fetch, not a build.
       in
       {
         # ── packages ────────────────────────────────────────────────────────────
-        packages = {
-          inherit wormhole-relay wormhole-node;
-          default = wormhole-node;
-        };
+        # No workspace member is currently exposed as a Nix package; the
+        # wormhole-relay / wormhole-node packages went away with the trim.
+        packages = { };
 
         # ── CI checks ───────────────────────────────────────────────────────────
-        checks = {
-          inherit wormhole-relay wormhole-node;
-          wormhole-clippy = craneLib.cargoClippy (wormholeArgs // {
-            cargoArtifacts = wormholeDeps;
-            cargoClippyExtraArgs = "-p wormhole-relay -p wormhole-node -- -D warnings";
-          });
-          wormhole-fmt = craneLib.cargoFmt { src = wormholeSrc; };
-        };
+        # `nix flake check` still evaluates packages and the devShell below.
+        # Building `-p wormhole-node` here is what kept this check red on main:
+        # that crate is no longer a workspace member, so cargo aborted with
+        # "package ID specification `wormhole-node` did not match any packages".
+        checks = { };
 
         # ── dev shell (unchanged) ────────────────────────────────────────────────
         devShells.default = pkgs.mkShell {
@@ -152,22 +118,5 @@
           '';
         };
       }
-    )
-    // {
-      # ── NixOS modules — import in your flake's nixosConfigurations ────────────
-      # Example:
-      #   inputs.crabcc.url = "github:8b-is/crabcc";
-      #   modules = [ inputs.crabcc.nixosModules.wormhole-relay ];
-      #   services.wormhole-relay = { enable = true; package = inputs.crabcc.packages.${system}.wormhole-relay; };
-      nixosModules = {
-        wormhole-relay = import ./nix/wormhole-relay.nix;
-        wormhole-node = import ./nix/wormhole-node.nix;
-      };
-
-      # Overlay to inject wormhole-relay + wormhole-node into nixpkgs
-      overlays.default = final: prev: {
-        wormhole-relay = self.packages.${prev.system}.wormhole-relay;
-        wormhole-node = self.packages.${prev.system}.wormhole-node;
-      };
-    };
+    );
 }
