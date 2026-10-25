@@ -96,15 +96,17 @@ fun launch(name: Text, args: Text): Int {
 // ---- bench definitions ----
 
 // Names and cargo args kept parallel so a for-loop can zip them.
+// The `alloc` lane used to be `-p wormhole-node --bench alloc_profile`. That
+// crate was trimmed out of the workspace in #767, so the lane invoked a package
+// that no longer exists and the fan-out died on it. The remaining lanes are the
+// ones that still have something to bench.
 const NAMES = [
     "workspace",
-    "alloc",
     "simd"
 ]
 
 const ARGS = [
     "--workspace",
-    "-p wormhole-node --bench alloc_profile",
     "-p crabcc-core --features bench --bench compress_simd"
 ]
 
