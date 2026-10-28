@@ -134,6 +134,7 @@ pub fn build_index_with_progress(
     const WRITE_BATCH: usize = 256;
     let mut stats = IndexStats::default();
     let mut done = 0usize;
+    let mut pending_edges: Vec<(i64, Vec<crate::types::Edge>)> = Vec::new();
     let mut iter = outcomes.into_iter();
     loop {
         let chunk: Vec<_> = iter.by_ref().take(WRITE_BATCH).collect();
@@ -146,10 +147,10 @@ pub fn build_index_with_progress(
                     FileOutcome::Extracted(f) => {
                         let file_id = store.upsert_file(&f.rel, &f.sha, f.mtime, f.lang)?;
                         store.replace_symbols(file_id, &f.symbols)?;
-                        store.replace_edges(file_id, &f.edges)?;
                         stats.files_indexed += 1;
                         stats.symbols += f.symbols.len();
                         stats.edges += f.edges.len();
+                        pending_edges.push((file_id, f.edges));
                     }
                     FileOutcome::SkippedUnsupported => stats.skipped_unsupported += 1,
                     FileOutcome::SkippedUnreadable => stats.skipped_unreadable += 1,
@@ -160,6 +161,19 @@ pub fn build_index_with_progress(
                 if let Some(ref p) = progress {
                     p.store(done, Ordering::Relaxed);
                 }
+            }
+            Ok(())
+        })?;
+    }
+    let mut edge_iter = pending_edges.into_iter();
+    loop {
+        let chunk: Vec<_> = edge_iter.by_ref().take(WRITE_BATCH).collect();
+        if chunk.is_empty() {
+            break;
+        }
+        store.write_batch(|store| {
+            for (file_id, edges) in chunk {
+                store.replace_edges(file_id, &edges)?;
             }
             Ok(())
         })?;
