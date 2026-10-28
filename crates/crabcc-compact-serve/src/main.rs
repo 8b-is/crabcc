@@ -35,10 +35,10 @@ struct Ctx {
 struct CompactReq {
     text: String,
     #[serde(default = "half")]
-    ratio: f64,
+    ratio: Ratio,
 }
-fn half() -> f64 {
-    0.5
+fn half() -> Ratio {
+    Ratio::new(1, 2)
 }
 
 #[derive(Serialize)]
@@ -136,7 +136,7 @@ fn with_path<T>(
     f(py)
 }
 
-fn py_compact(python_path: &str, text: &str, ratio: f64) -> Result<CompactResp> {
+fn py_compact(python_path: &str, text: &str, ratio: Ratio) -> Result<CompactResp> {
     Python::attach(|py| {
         with_path(py, python_path, |py| {
             let r = py
