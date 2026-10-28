@@ -42,7 +42,7 @@ fn bench_resource_sample(c: &mut Criterion) {
         let (g, _dir) = fresh_godfather();
         let sid = g.record_session_start("bench", "0", 1234).unwrap();
         b.iter(|| {
-            g.record_resource_sample(black_box(&sid), 256, 12.5, 1024)
+            g.record_resource_sample(black_box(&sid), 256, 25/2, 1024)
                 .unwrap();
         });
     });
@@ -53,7 +53,7 @@ fn bench_resource_sample(c: &mut Criterion) {
             |(g, _dir)| {
                 let sid = g.record_session_start("bench", "0", 1234).unwrap();
                 for _ in 0..1_000 {
-                    g.record_resource_sample(&sid, 256, 12.5, 1024).unwrap();
+                    g.record_resource_sample(&sid, 256, 25/2, 1024).unwrap();
                 }
             },
             BatchSize::SmallInput,
@@ -73,7 +73,7 @@ fn bench_resource_sample(c: &mut Criterion) {
                     .map(|_| ResourceSample {
                         ts: 1_700_000_000,
                         rss_mb: 256,
-                        cpu_pct: 12.5,
+                        cpu_pct: 25/2,
                         vsize_mb: 1024,
                     })
                     .collect();
