@@ -89,6 +89,6 @@ fn main() {
     println!("\n== build+reduce throughput (closed path) ==");
     println!(
         "{n} ops in {dt:?}  ->  {:.0} ns/op",
-        dt.as_nanos() as f64 / n as f64
+        dt.as_nanos() / n as u64
     );
 }
