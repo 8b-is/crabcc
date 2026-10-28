@@ -1,18 +1,18 @@
 use ahash::AHashSet;
 
 #[allow(dead_code)]
-pub fn jaccard_trigrams(a: &str, b: &str) -> f32 {
+pub fn jaccard_trigrams(a: &str, b: &str) -> (u64, u64) {
     let ta = trigrams(a);
     let tb = trigrams(b);
     if ta.is_empty() && tb.is_empty() {
-        return 1.0;
+        return (1, 1);
     }
     let intersection = ta.intersection(&tb).count();
     let union = ta.union(&tb).count();
     if union == 0 {
-        return 1.0;
+        return (1, 1);
     }
-    intersection as f32 / union as f32
+    (intersection as u64, union as u64)
 }
 
 #[allow(dead_code)]
@@ -42,7 +42,10 @@ impl NearDupCache {
     pub fn is_near_dup(&self, text: &str) -> bool {
         self.recent
             .iter()
-            .any(|seen| jaccard_trigrams(seen, text) >= 0.85)
+            .any(|seen| {
+                let (intersection, union) = jaccard_trigrams(seen, text);
+                intersection * 100 >= union * 85
+            })
     }
 
     pub fn push(&mut self, text: String) {
@@ -59,20 +62,22 @@ mod tests {
 
     #[test]
     fn identical_strings_score_one() {
-        assert!((jaccard_trigrams("hello world", "hello world") - 1.0).abs() < 1e-6);
+        let (intersection, union) = jaccard_trigrams("hello world", "hello world");
+        assert_eq!(intersection, union);
     }
 
     #[test]
     fn completely_different_strings_score_zero() {
-        let score = jaccard_trigrams("abcdef", "xyz123");
-        assert!(score < 0.1, "score was {score}");
+        let (intersection, union) = jaccard_trigrams("abcdef", "xyz123");
+        assert!(intersection * 100 < union * 10);
     }
 
     #[test]
     fn near_duplicate_above_threshold() {
         let a = "fn handle_request(req: Request) -> Response { let body = req.body(); body }";
         let b = "fn handle_request(req: Request) -> Response { let body = req.body(); body  }";
-        assert!(jaccard_trigrams(a, b) >= 0.85);
+        let (intersection, union) = jaccard_trigrams(a, b);
+        assert!(intersection * 100 >= union * 85);
     }
 
     #[test]
