@@ -54,7 +54,7 @@ impl InstallSource {
 pub struct ResourceSample {
     pub ts: u64,
     pub rss_mb: u64,
-    pub cpu_pct: f32,
+    
     pub vsize_mb: u64,
 }
 
