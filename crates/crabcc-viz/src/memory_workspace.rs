@@ -205,8 +205,7 @@ fn recent_one(db: &Path, limit: usize) -> Result<Vec<RawHit>> {
             wing: r.get::<_, Option<String>>(2)?.unwrap_or_else(|| "?".into()),
             room: r.get(3)?,
             body_preview: r.get(4)?,
-            score: 0.0,
-            created_at: r.get(5)?,
+                        created_at: r.get(5)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
