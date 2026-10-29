@@ -62,7 +62,7 @@ struct SearchHit {
     body_preview: String,
     /// Relevance score (RRF for hybrid, BM25 for lexical, cosine for vector,
     /// 0.0 for the empty-query "recent" listing).
-    score: f32,
+    
     created_at: i64,
 }
 
@@ -222,7 +222,7 @@ struct RawHit {
     wing: String,
     room: Option<String>,
     body_preview: String,
-    score: f32,
+    
     created_at: i64,
 }
 
