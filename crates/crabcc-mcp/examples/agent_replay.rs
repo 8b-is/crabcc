@@ -75,16 +75,19 @@ fn parse_args() -> Result<Args, String> {
     })
 }
 
-fn percentile(sorted: &[Duration], pct: f64) -> Duration {
+fn percentile(sorted: &[Duration], pct_num: u64, pct_den: u64) -> Duration {
     if sorted.is_empty() {
         return Duration::ZERO;
     }
-    let idx = ((pct / 100.0) * (sorted.len() - 1) as f64).round() as usize;
+    // idx = (pct_num / pct_den) * (len - 1)
+    // To avoid float, we do: (pct_num * (len - 1)) / pct_den
+    let len_minus_1 = (sorted.len() - 1) as u64;
+    let idx = ((pct_num * len_minus_1) / pct_den) as usize;
     sorted[idx.min(sorted.len() - 1)]
 }
 
-fn us(d: Duration) -> f64 {
-    d.as_secs_f64() * 1e6
+fn us(d: Duration) -> u64 {
+    d.as_micros()
 }
 
 fn main() {
