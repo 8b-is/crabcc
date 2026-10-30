@@ -62,7 +62,7 @@ struct SearchHit {
     body_preview: String,
     /// Relevance score (RRF for hybrid, BM25 for lexical, cosine for vector,
     /// 0.0 for the empty-query "recent" listing).
-    
+    score: f32,
     created_at: i64,
 }
 
@@ -205,7 +205,8 @@ fn recent_one(db: &Path, limit: usize) -> Result<Vec<RawHit>> {
             wing: r.get::<_, Option<String>>(2)?.unwrap_or_else(|| "?".into()),
             room: r.get(3)?,
             body_preview: r.get(4)?,
-                        created_at: r.get(5)?,
+            score: 0.0,
+            created_at: r.get(5)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -221,7 +222,7 @@ struct RawHit {
     wing: String,
     room: Option<String>,
     body_preview: String,
-    
+    score: f32,
     created_at: i64,
 }
 
