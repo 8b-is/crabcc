@@ -186,18 +186,25 @@ fn main() {
         syms.len(),
         args.root.display(),
     );
+    let total_ms = total.as_millis() * 1000 + (total.subsec_nanos() as u64 / 1_000_000);
+    let throughput_calls_per_sec = if total.as_nanos() > 0 {
+        (reqs.len() as u128 * 1_000_000_000) / total.as_nanos()
+    } else {
+        0
+    };
+
     println!(
-        "  total: {:.2} ms   throughput: {:.0} calls/s",
-        total.as_secs_f64() * 1e3,
-        reqs.len() as f64 / total.as_secs_f64(),
+        "  total: {} ms   throughput: {} calls/s",
+        total_ms,
+        throughput_calls_per_sec,
     );
     if !durs.is_empty() {
         durs.sort_unstable();
         println!(
-            "  per-call µs:  min {:.1}  median {:.1}  p95 {:.1}  max {:.1}",
+            "  per-call µs:  min {}  median {}  p95 {}  max {}",
             us(durs[0]),
-            us(percentile(&durs, 50.0)),
-            us(percentile(&durs, 95.0)),
+            us(percentile(&durs, 50, 100)),
+            us(percentile(&durs, 95, 100)),
             us(durs[durs.len() - 1]),
         );
     }
