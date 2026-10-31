@@ -169,10 +169,18 @@ fn train_codec(db: &Path) -> Result<Codec> {
     let sample_count = samples.len();
     let refs: Vec<&[u8]> = samples.iter().map(|v| v.as_slice()).collect();
     let codec = Codec::train(&refs).context("Codec::train")?;
+    let kb_num = total_bytes / 1024;
+    let kb_rem = (total_bytes % 1024) * 10;
+    let kb_display = if kb_rem >= 5 { 
+        format!("{}.{}", kb_num, (kb_rem / 100) + 1) 
+    } else {
+        format!("{}.{}", kb_num, kb_rem / 100)
+    };
+
     eprintln!(
-        "Trained FSST symbol table: {} samples ({:.1} kB) — sig={}B path={}B name={}B",
+        "Trained FSST symbol table: {} samples ({} kB) — sig={}B path={}B name={}B",
         sample_count,
-        (total_bytes as f64) / 1024.0,
+        kb_display,
         total_sig,
         total_path,
         total_name
