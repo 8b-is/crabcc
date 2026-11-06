@@ -38,9 +38,9 @@ name: Codex auto-fix (Aperture)
 # ── DISABLED: dispatch-only until the Aperture route is settled ──────────
 # This workflow talks to Aperture at `http://$APERTURE_HOSTNAME/v1`, a
 # MagicDNS name that only resolves from inside the tailnet. The Hetzner
-# self-hosted runners were tailnet-joined; the Blacksmith runners that
-# replaced them are not, so every automatic run would burn a full
-# checkout + toolchain install and then die on DNS.
+# self-hosted runners were tailnet-joined; standard GitHub-hosted runners
+# are not, so every automatic run would burn a full checkout + toolchain
+# install and then die on DNS.
 #
 # The `issue_comment` trigger is commented out rather than deleted — the
 # @codex / @codex-fix mention path is one uncomment away once either:
@@ -48,8 +48,7 @@ name: Codex auto-fix (Aperture)
 #      ephemeral-node OAuth client whose tag is authorized on the Aperture
 #      ACL (Aperture authenticates by Tailscale identity, so joining the
 #      tailnet is necessary but not sufficient), or
-#   b) Aperture is reachable over a routable address with the Blacksmith
-#      static IP allowlisted, and base_url below is updated.
+#   b) Aperture is reachable over a routable address and base_url below is updated.
 # Same gate applies to conflict-bot.yml.
 on:
   workflow_dispatch:
@@ -81,7 +80,7 @@ jobs:
        (contains(github.event.comment.body, '@codex-fix') ||
         contains(github.event.comment.body, '@codex')))
     name: Resolve target PR(s)
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     outputs:
       prs: ${{ steps.resolve.outputs.prs }}
     steps:
@@ -119,7 +118,7 @@ jobs:
     needs: triage
     if: needs.triage.outputs.prs != '[]' && needs.triage.outputs.prs != ''
     name: Codex fix PR #${{ matrix.pr }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       max-parallel: 3
@@ -161,7 +160,7 @@ jobs:
 
       - name: Checkout PR head
         if: steps.meta.outputs.skip != 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ steps.meta.outputs.head_ref }}
           fetch-depth: 0
@@ -169,7 +168,7 @@ jobs:
 
       - name: Setup Node
         if: steps.meta.outputs.skip != 'true'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
 

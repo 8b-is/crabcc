@@ -5,10 +5,9 @@ description: >
   (required by shell_rewrite_e2e::find_swaps_to_ripgrep, which only emits the
   find→rg swap when `rg` is on PATH).
 
-  Replaces the old mold→wild→default-ld fallback ladder. That ladder existed
-  because the Hetzner self-hosted runners routinely ENOSPC'd mid-apt; Blacksmith
-  runners are ephemeral microVMs with 80+ GB of scratch, so a failed install is
-  a real failure and should stop the job rather than silently degrade.
+  Replaces the old mold→wild→default-ld fallback ladder. Ephemeral Ubuntu 24.04
+  runners have ample scratch space, so a failed install is a real failure and
+  should stop the job rather than silently degrade.
 
 runs:
   using: composite
