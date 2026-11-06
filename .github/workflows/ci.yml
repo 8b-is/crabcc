@@ -57,14 +57,13 @@ jobs:
     # pick up build jobs.  Jobs queue here until an eligible runner is ready.
     # One-time setup: GitHub Settings → Actions → Runners → add 'gh-runner'
     # label to runner-01 and runner-01b.
-    runs-on: [self-hosted, linux, hetzner, gh-runner]
+    runs-on: ubuntu-24.04
     env:
       RUSTC_WRAPPER: ""  # override global; cargo fmt never invokes rustc
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      - uses: ./.github/actions/disk-guard
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -80,16 +79,15 @@ jobs:
 
   lint:
     name: lint (clippy)
-    runs-on: [self-hosted, linux, hetzner, gh-runner]
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           # Full history so the PR diff (base..head) resolves. Must be a literal
           # 0, not `event == 'pull_request' && 0 || 1`: that ternary always
           # yields 1 because 0 is falsy in GitHub Actions expressions, leaving a
           # shallow clone where `git diff <base> <head>` dies with "bad object".
           fetch-depth: 0
-      - uses: ./.github/actions/disk-guard
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -218,16 +216,15 @@ jobs:
 
   test:
     name: test (ubuntu, scoped)
-    runs-on: [self-hosted, linux, hetzner, gh-runner]
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           # Full history so the PR diff (base..head) resolves. Must be a literal
           # 0, not `event == 'pull_request' && 0 || 1`: that ternary always
           # yields 1 because 0 is falsy in GitHub Actions expressions, leaving a
           # shallow clone where `git diff <base> <head>` dies with "bad object".
           fetch-depth: 0
-      - uses: ./.github/actions/disk-guard
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -352,7 +349,7 @@ jobs:
 
       - name: upload test report (JUnit XML)
         if: always() && steps.scope.outputs.scope != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: junit-ubuntu
           path: target/nextest/ci/junit.xml
