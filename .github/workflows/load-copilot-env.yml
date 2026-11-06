@@ -20,10 +20,10 @@ concurrency:
 
 jobs:
   export:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     environment: copilot
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Write copilot.env
         env:
@@ -50,7 +50,7 @@ jobs:
           } > out/copilot.env
           chmod 600 out/copilot.env
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: copilot-env
           path: out/copilot.env

@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   remind:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     # Never run on forks.
     if: github.repository == '8b-is/crabcc'
     steps:
