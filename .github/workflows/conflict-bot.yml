@@ -39,7 +39,7 @@ name: Conflict bot
 
 # ── DISABLED: dispatch-only until the Aperture route is settled ──────────
 # Same tailnet gap as codex-auto-fix.yml (see the header comment there):
-# `http://$APERTURE_HOSTNAME/v1` is MagicDNS-only and the Blacksmith runners
+# `http://$APERTURE_HOSTNAME/v1` is MagicDNS-only and standard GitHub-hosted runners
 # are not tailnet-joined. The `*/5` cron would otherwise fail 288 times a
 # day. Uncomment both triggers once the Aperture route works from CI.
 on:
@@ -71,7 +71,7 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.label.name == 'needs-manual-rebase'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     outputs:
       prs: ${{ steps.find.outputs.prs }}
     steps:
@@ -113,7 +113,7 @@ jobs:
       max-parallel: 1
       matrix:
         pr: ${{ fromJSON(needs.triage.outputs.prs) }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -149,7 +149,7 @@ jobs:
 
       - name: Checkout PR head
         if: steps.meta.outputs.skip != 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ steps.meta.outputs.head_ref }}
           fetch-depth: 0
@@ -185,7 +185,7 @@ jobs:
             fi
           fi
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v4
         if: steps.meta.outputs.skip != 'true' && steps.clean.outputs.result == 'conflict'
         with:
           node-version: '20'
