@@ -20,9 +20,9 @@ concurrency:
 
 jobs:
   flake-check:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - name: nix flake check
         run: nix flake check --accept-flake-config --show-trace
