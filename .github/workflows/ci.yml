@@ -61,7 +61,7 @@ jobs:
     env:
       RUSTC_WRAPPER: ""  # override global; cargo fmt never invokes rustc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - uses: dtolnay/rust-toolchain@stable
@@ -81,7 +81,7 @@ jobs:
     name: lint (clippy)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so the PR diff (base..head) resolves. Must be a literal
           # 0, not `event == 'pull_request' && 0 || 1`: that ternary always
@@ -218,7 +218,7 @@ jobs:
     name: test (ubuntu, scoped)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so the PR diff (base..head) resolves. Must be a literal
           # 0, not `event == 'pull_request' && 0 || 1`: that ternary always
@@ -349,7 +349,7 @@ jobs:
 
       - name: upload test report (JUnit XML)
         if: always() && steps.scope.outputs.scope != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: junit-ubuntu
           path: target/nextest/ci/junit.xml
