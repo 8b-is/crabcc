@@ -378,7 +378,7 @@ fn alive(m: &Meta) -> bool {
 fn proc_info(pid: u32) -> Option<(u64, bool)> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System};
     let p = Pid::from_u32(pid);
-    let mut sys = System::new();
+    let mut sys = System::new().ok()?;
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[p]),
         true,
