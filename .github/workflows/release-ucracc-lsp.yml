@@ -37,7 +37,7 @@ jobs:
             archive: tar.gz
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -64,7 +64,7 @@ jobs:
           (cd dist && shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
           ls -la dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ucracc-lsp-${{ matrix.target }}
           path: dist/*
@@ -79,8 +79,8 @@ jobs:
       COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
       COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
